@@ -3,7 +3,7 @@ import { NetworkScene } from 'ubiq';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-class DynamicCapture extends ServiceController {
+class DynamicCaptureService extends ServiceController {
     constructor(scene: NetworkScene, name = 'DynamicCapture') {
         super(scene, name);
 
@@ -13,9 +13,9 @@ class DynamicCapture extends ServiceController {
         // This sample Python file sends a message every 5 seconds.
         this.registerChildProcess('periodic-text-sender', 'python', [
             '-u',
-            path.join(__dirname, './interval_text_printer.py'),
+            path.join(__dirname, './Capture.py'),
         ]);
     }
 }
 
-export { DynamicCapture };
+export { DynamicCaptureService };

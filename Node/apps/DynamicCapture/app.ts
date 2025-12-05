@@ -1,5 +1,5 @@
 import { ApplicationController } from '../../components/application';
-import { BaseService } from '../../services/base/service';
+import { DynamicCaptureService } from '../../services/dynamic_capture/service';
 import path from 'path';
 import { NetworkId } from 'ubiq-server/ubiq';
 import { fileURLToPath } from 'url';
@@ -24,7 +24,7 @@ class DynamicCapture extends ApplicationController {
 
     registerComponents(): void {
         // A MessageReader to read audio data from peers based on fixed network ID
-        this.components.intervalPrinter = new BaseService(this.scene);
+        this.components.intervalPrinter = new DynamicCaptureService(this.scene);
     }
 
     definePipeline(): void {
