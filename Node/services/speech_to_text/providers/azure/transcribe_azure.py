@@ -1,11 +1,9 @@
 import os
 import sys
-import json
 import azure.cognitiveservices.speech as speechsdk
 from azure.cognitiveservices.speech.audio import AudioStreamFormat, AudioConfig
-import argparse
 
-def recognize_from_stdin(peer):
+def recognize_from_stdin():
     speech_config = speechsdk.SpeechConfig(
         subscription=os.environ.get("SPEECH_KEY"),
         region=os.environ.get("SPEECH_REGION"),
@@ -46,11 +44,7 @@ def recognize_from_stdin(peer):
             break
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--peer", type=str, default="00000000-0000-0000-0000-000000000000")
-    args = parser.parse_args()
-
-    recognize_from_stdin(args.peer)
+    recognize_from_stdin()
     print("Azure Speech client stopped receiving chunks.")
 
 if __name__ == "__main__":
