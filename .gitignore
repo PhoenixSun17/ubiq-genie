@@ -15,3 +15,7 @@ config/local.json
 
 # IntelliJ IDEA #
 .idea/
+
+# Virtual environment folders
+venv/
+.venv/

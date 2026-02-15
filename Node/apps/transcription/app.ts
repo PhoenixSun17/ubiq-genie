@@ -68,7 +68,7 @@ class Transcription extends ApplicationController {
             // Send the audio data to the transcription service and the audio recording service
             if (this.roomClient.peers.get(uuid) !== undefined) {
                 this.components.speech2text?.sendToChildProcess(uuid, sampleBuffer);
-                this.components.audioRecorder?.sendToChildProcess(uuid, sampleBuffer);
+                this.components.audioRecorder?.write(uuid, sampleBuffer);
             }
         });
 

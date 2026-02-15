@@ -1,11 +1,10 @@
 import { ServiceController } from '../../components/service';
+import type { ServiceProvider } from '../../components/service';
 import { NetworkScene } from 'ubiq-server/ubiq';
-import nconf from 'nconf';
+import { AzureTTSProvider } from './providers/azure/provider';
 
 export class TextToSpeechService extends ServiceController {
-    constructor(scene: NetworkScene) {
-        super(scene, 'TextToSpeechService');
-
-        this.registerChildProcess('default', 'python', ['-u', '../../services/text_to_speech/text_to_speech_azure.py']);
+    constructor(scene: NetworkScene, provider: ServiceProvider = AzureTTSProvider) {
+        super(scene, 'TextToSpeechService', provider);
     }
 }
