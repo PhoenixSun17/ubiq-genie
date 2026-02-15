@@ -19,7 +19,7 @@ These instructions will get you a copy of the project up and running to run the 
 
 2. Open a terminal in the `Node` folder and run `npm install` to install the dependencies.
 
-3. Install the Python dependencies by navigating to the `Node/services` folder and running `pip install -r requirements.txt`. If you are using a virtual environment, activate it before running the command. Please ensure that you have the correct PyTorch and CUDA versions installed (see the [PyTorch website](https://pytorch.org/get-started/locally/) for more information).
+3. Install the Python dependencies for the services you plan to use. Each service provider has its own `requirements.txt` file located in its provider folder (e.g., `Node/services/speech_to_text/providers/azure/requirements.txt`). Install them with `pip install -r <path_to_requirements.txt>`. If you are using a virtual environment, activate it before running the command. Missing dependencies will be flagged as warnings when a service starts. Please ensure that you have the correct PyTorch and CUDA versions installed (see the [PyTorch website](https://pytorch.org/get-started/locally/) for more information).
 
 ### Client (Unity)
 

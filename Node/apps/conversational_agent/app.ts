@@ -15,7 +15,7 @@ export class ConversationalAgent extends ApplicationController {
         textGenerationService?: TextGenerationService;
         textToSpeechService?: TextToSpeechService;
     } = {};
-    targetPeer: string = '';
+    targetPeerQueue: string[] = [];
     constructor(configFile: string = 'config.json') {
         super(configFile);
     }
@@ -94,16 +94,17 @@ export class ConversationalAgent extends ApplicationController {
                 return;
             }
 
-            this.targetPeer = name.trim();
+            this.targetPeerQueue.push(name.trim());
             this.components.textToSpeechService?.sendToChildProcess('default', message.trim() + '\n');
         });
 
         this.components.textToSpeechService?.on('data', (data: Buffer, identifier: string) => {
             let response = data;
+            const targetPeer = this.targetPeerQueue.shift() ?? '';
 
             this.scene.send(new NetworkId(95), {
                 type: 'AudioInfo',
-                targetPeer: this.targetPeer,
+                targetPeer: targetPeer,
                 audioLength: data.length,
             });
 
