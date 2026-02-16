@@ -236,12 +236,25 @@ class ServiceController extends EventEmitter {
         if (childProcess && childProcess.stdout && childProcess.stderr) {
             childProcess.stdout.on('data', (data) => this.emit('data', data, identifier));
             childProcess.stderr.on('data', (data) => {
-                console.error(`\x1b[31mService ${this.name} error, from child process ${identifier}:${data}\x1b[0m`);
+                const message = data.toString().trim();
+                if (message) {
+                    this.log(`Child process ${identifier}: ${message}`, 'warning');
+                }
             });
             childProcess.on('close', (code, signal) => {
                 delete this.childProcesses[identifier];
                 this.emit('close', code, signal, identifier);
             });
+            // Prevent unhandled EPIPE errors when writing to a process that has exited
+            if (childProcess.stdin) {
+                childProcess.stdin.on('error', (err) => {
+                    if ((err as NodeJS.ErrnoException).code === 'EPIPE') {
+                        this.log(`Child process ${identifier} stdin closed (EPIPE)`, 'warning');
+                    } else {
+                        this.log(`Child process ${identifier} stdin error: ${err.message}`, 'error');
+                    }
+                });
+            }
         }
 
         this.log(`Registered child process with identifier: ${identifier}`);
@@ -276,12 +289,18 @@ class ServiceController extends EventEmitter {
      * @throws {Error} Throws an error if the child process with the specified identifier is not found.
      */
     sendToChildProcess(identifier: string, data: string | Buffer) {
-        if (this.childProcesses[identifier] === undefined) {
+        const child = this.childProcesses[identifier];
+        if (child === undefined) {
             this.log(`Child process with identifier ${identifier} not found for service: ${this.name}`, 'error');
             return;
         }
 
-        this.childProcesses[identifier].stdin!.write(data);
+        if (child.killed || !child.stdin || child.stdin.destroyed) {
+            this.log(`Child process ${identifier} is no longer writable`, 'warning');
+            return;
+        }
+
+        child.stdin.write(data);
     }
 
     /**

@@ -2,6 +2,7 @@
 import { ApplicationController } from '../../components/application';
 import { NetworkId } from 'ubiq-server/ubiq';
 import { SpeechToTextService } from '../../services/speech_to_text/service';
+import { NemotronStreamingSTTProvider } from '../../services/speech_to_text/providers/nemotron_streaming/provider';
 import fs from 'fs';
 import path from 'path';
 import { MediaReceiver } from '../../components/media_receiver';
@@ -39,7 +40,7 @@ class Transcription extends ApplicationController {
         this.components.mediaReceiver = new MediaReceiver(this.scene);
 
         // A SpeechToTextService to transcribe audio coming from peers
-        this.components.speech2text = new SpeechToTextService(this.scene);
+        this.components.speech2text = new SpeechToTextService(this.scene, NemotronStreamingSTTProvider);
 
         // An AudioRecorder to record audio data from peers
         this.components.audioRecorder = new AudioRecorder(this.scene);
