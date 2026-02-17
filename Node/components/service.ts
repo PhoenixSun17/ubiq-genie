@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'fs';
 import { NetworkScene } from 'ubiq-server/ubiq';
 import { Logger } from './logger';
 import { RoomClient } from 'ubiq-server/components/roomclient';
+import nconf from 'nconf';
 
 /**
  * Defines the lifecycle mode for child processes managed by a service.
@@ -121,8 +122,10 @@ class ServiceController extends EventEmitter {
 
         if (packages.length === 0) return;
 
+        const pythonCommand = this.resolveCommand('python');
+
         // Use pip to check installed packages in one call
-        const result = spawnSync('python', ['-m', 'pip', 'show', ...packages], {
+        const result = spawnSync(pythonCommand, ['-m', 'pip', 'show', ...packages], {
             encoding: 'utf-8',
             timeout: 15000,
         });
@@ -131,7 +134,7 @@ class ServiceController extends EventEmitter {
             // Determine which specific packages are missing
             const missing: string[] = [];
             for (const pkg of packages) {
-                const check = spawnSync('python', ['-m', 'pip', 'show', pkg], {
+                const check = spawnSync(pythonCommand, ['-m', 'pip', 'show', pkg], {
                     encoding: 'utf-8',
                     timeout: 10000,
                 });
@@ -156,12 +159,26 @@ class ServiceController extends EventEmitter {
         const provider = this.provider!;
         const args =
             typeof provider.args === 'function' ? provider.args(identifier) : provider.args;
+        const command = this.resolveCommand(provider.command);
 
         const spawnOptions: SpawnOptions | undefined = provider.env
             ? { env: { ...process.env, ...provider.env } }
             : undefined;
 
-        this.registerChildProcess(identifier, provider.command, args, spawnOptions);
+        this.registerChildProcess(identifier, command, args, spawnOptions);
+    }
+
+    private resolveCommand(command: string): string {
+        if (command !== 'python') {
+            return command;
+        }
+
+        const configuredPython = nconf.get('pythonCommand');
+        if (typeof configuredPython === 'string' && configuredPython.trim().length > 0) {
+            return configuredPython.trim();
+        }
+
+        return 'python3';
     }
 
     /**
@@ -244,6 +261,11 @@ class ServiceController extends EventEmitter {
             childProcess.on('close', (code, signal) => {
                 delete this.childProcesses[identifier];
                 this.emit('close', code, signal, identifier);
+            });
+            childProcess.on('error', (err) => {
+                delete this.childProcesses[identifier];
+                this.log(`Failed to start child process ${identifier}: ${err.message}`, 'error');
+                this.emit('close', -1, 'ERROR', identifier);
             });
             // Prevent unhandled EPIPE errors when writing to a process that has exited
             if (childProcess.stdin) {
