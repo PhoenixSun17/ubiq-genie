@@ -169,6 +169,10 @@ def main():
 
     print("Model loaded, streaming ready.", file=sys.stderr)
 
+    # Signal readiness to the parent process (convention: >READY on stdout)
+    print(">READY")
+    sys.stdout.flush()
+
     # Bytes needed for one chunk at the input sample rate
     chunk_samples_48k = int(INPUT_SAMPLE_RATE * CHUNK_SIZE_MS / 1000)
     bytes_per_chunk = chunk_samples_48k * SAMPLE_WIDTH * CHANNELS

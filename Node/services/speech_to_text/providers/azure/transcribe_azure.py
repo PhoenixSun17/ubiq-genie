@@ -34,6 +34,10 @@ def recognize_from_stdin():
     result_future = speech_recognizer.start_continuous_recognition_async()
     result_future.get()
 
+    # Signal readiness to the parent process (convention: >READY on stdout)
+    print(">READY")
+    sys.stdout.flush()
+
     while not done:
         try:
             data = sys.stdin.buffer.read(4096)
