@@ -51,6 +51,21 @@ export class ApplicationController {
         Logger.log(`\x1b[1m${this.name}\x1b[0m`, message, level, end, '\x1b[1m');
     }
 
+    /**
+     * Append streaming text to the current output line without repeating the prefix.
+     * Call `flushStream()` (or any regular `log()`) to terminate the line.
+     */
+    logStream(text: string): void {
+        Logger.logStream(`\x1b[1m${this.name}\x1b[0m`, text, '\x1b[1m');
+    }
+
+    /**
+     * End the current streaming log line, if one is active.
+     */
+    flushStream(): void {
+        Logger.flushStream();
+    }
+
     async joinRoom(): Promise<void> {
         let uri = nconf.get('roomserver:uri');
         if (!nconf.get('roomserver:joinExisting')) {
@@ -134,12 +149,14 @@ export class ApplicationController {
 
         if (child.stderr) {
             child.stderr.on('data', (data) => {
+                Logger.flushStream();
                 process.stderr.write(`\x1b[31m[Ubiq Server]\x1b[0m ${data}`);
             });
         }
 
         if (child.stdout) {
             child.stdout.on('data', (data) => {
+                Logger.flushStream();
                 process.stdout.write(`\x1b[32m[Ubiq Server]\x1b[0m ${data}`);
             });
         }

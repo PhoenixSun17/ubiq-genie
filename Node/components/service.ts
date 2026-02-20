@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { spawn, spawnSync, ChildProcess, SpawnOptions } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
+import path from 'path';
 import { NetworkScene } from 'ubiq-server/ubiq';
 import { Logger } from './logger';
 import { RoomClient } from 'ubiq-server/components/roomclient';
@@ -173,9 +174,18 @@ class ServiceController extends EventEmitter {
             return command;
         }
 
-        const configuredPython = nconf.get('pythonCommand');
+        // Check both pythonCommand and pythonPath (alias) from config
+        const configuredPython =
+            nconf.get('pythonCommand') ?? nconf.get('pythonPath');
         if (typeof configuredPython === 'string' && configuredPython.trim().length > 0) {
-            return configuredPython.trim();
+            const trimmed = configuredPython.trim();
+            if (!path.isAbsolute(trimmed)) {
+                throw new Error(
+                    `pythonCommand/pythonPath must be an absolute path, got: "${trimmed}". ` +
+                    `Example: "/home/user/.venv/bin/python"`
+                );
+            }
+            return trimmed;
         }
 
         return 'python3';
@@ -305,24 +315,25 @@ class ServiceController extends EventEmitter {
      * Sends data to a child process with the specified identifier.
      *
      * @memberof Service
-     * @param {string} data - The data to send to the child process.
      * @param {string} identifier - The identifier of the child process to send the data to.
-     * @instance
-     * @throws {Error} Throws an error if the child process with the specified identifier is not found.
+     * @param {string | Buffer} data - The data to send to the child process.
+     * @returns {boolean | undefined} `true` if the data was flushed, `false` if it was
+     *   buffered internally (backpressure), or `undefined` if the write could not be
+     *   performed at all.
      */
-    sendToChildProcess(identifier: string, data: string | Buffer) {
+    sendToChildProcess(identifier: string, data: string | Buffer): boolean | undefined {
         const child = this.childProcesses[identifier];
         if (child === undefined) {
             this.log(`Child process with identifier ${identifier} not found for service: ${this.name}`, 'error');
-            return;
+            return undefined;
         }
 
         if (child.killed || !child.stdin || child.stdin.destroyed) {
             this.log(`Child process ${identifier} is no longer writable`, 'warning');
-            return;
+            return undefined;
         }
 
-        child.stdin.write(data);
+        return child.stdin.write(data);
     }
 
     /**
