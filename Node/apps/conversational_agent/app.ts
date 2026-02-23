@@ -4,7 +4,7 @@ import { TextToSpeechService } from '../../services/text_to_speech/service';
 import { SpeechToTextService } from '../../services/speech_to_text/service';
 import { TextGenerationService } from '../../services/text_generation/service';
 import { AudioToAudioService } from '../../services/audio_to_audio/service';
-import { MediaReceiver } from '../../components/media_receiver';
+import { VoipReceiver } from '../../components/voip_receiver';
 import {
     encodePacket,
     LengthPrefixedParser,
@@ -34,7 +34,7 @@ const AUDIO_BATCH_MS = Number(process.env.UBIQ_AUDIO_BATCH_MS) || 240;
 
 export class ConversationalAgent extends ApplicationController {
     components: {
-        mediaReceiver?: MediaReceiver;
+        voipReceiver?: VoipReceiver;
         speech2text?: SpeechToTextService;
         textGenerationService?: TextGenerationService;
         textToSpeechService?: TextToSpeechService;
@@ -82,8 +82,8 @@ export class ConversationalAgent extends ApplicationController {
     }
 
     registerComponents() {
-        // A MediaReceiver to receive audio data from peers
-        this.components.mediaReceiver = new MediaReceiver(this.scene);
+        // A VoipReceiver to receive audio data from peers via WebRTC VOIP
+        this.components.voipReceiver = new VoipReceiver(this.scene);
 
         if (this.useAudioToAudio) {
             // Audio-to-audio mode: single PersonaPlex service replaces STT + text gen + TTS
@@ -127,7 +127,7 @@ export class ConversationalAgent extends ApplicationController {
         const service = this.components.audioToAudioService!;
 
         // ---- Input: receive 48 kHz PCM16 from WebRTC ----
-        this.components.mediaReceiver?.on('audio', (uuid: string, data: RTCAudioData) => {
+        this.components.voipReceiver?.on('audio', (uuid: string, data: RTCAudioData) => {
             if (this.roomClient.peers.get(uuid) === undefined) {
                 return;
             }
@@ -259,7 +259,7 @@ export class ConversationalAgent extends ApplicationController {
      */
     private defineTraditionalPipeline() {
         // Step 1: When we receive audio data from a peer we send it to the transcription service
-        this.components.mediaReceiver?.on('audio', (uuid: string, data: RTCAudioData) => {
+        this.components.voipReceiver?.on('audio', (uuid: string, data: RTCAudioData) => {
             // Convert the Int16Array to a Buffer
             const sampleBuffer = Buffer.from(data.samples.buffer);
 
