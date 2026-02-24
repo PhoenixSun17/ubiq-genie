@@ -8,8 +8,8 @@ import time
 # --- CONFIGURATION ---
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5065
-UNITY_AREA_WIDTH = 10.0
-UNITY_AREA_HEIGHT = 10.0
+UNITY_AREA_WIDTH = 7
+UNITY_AREA_HEIGHT = 7
 LOG_FILENAME = "tracking_log.csv"
 
 # Camera Params (Insta360 - standard or fisheye, used if you uncomment undistort)
@@ -48,6 +48,17 @@ def map_pixel_to_unity(matrix, pixel_x, pixel_y):
     transformed = cv2.perspectiveTransform(point, matrix)
     return transformed[0][0]
 
+def calculate_unity_scale(matrix, x, y, w, h):
+    """Calculates the width and height of a bounding box in Unity units."""
+    # Transform the top-left and bottom-right points of the bounding box
+    p1 = map_pixel_to_unity(matrix, x, y)
+    p2 = map_pixel_to_unity(matrix, x + w, y + h)
+    
+    # Scale is the absolute difference between the transformed coordinates
+    u_w = abs(p2[0] - p1[0])
+    u_h = abs(p2[1] - p1[1])
+    return round(float(u_w), 3), round(float(u_h), 3)
+
 def run_tracking(video_source=0):
     global reference_frame, prev_frame
 
@@ -85,7 +96,7 @@ def run_tracking(video_source=0):
             if not ret: break
             
             frame_count += 1
-            frame = raw_frame # Add undistortion logic here if needed
+            frame = raw_frame 
 
             # --- CALIBRATION PHASE ---
             if not calibration_complete:
@@ -114,31 +125,28 @@ def run_tracking(video_source=0):
                     continue
 
                 # 3. Compare with BASE (Static Detection) and PREVIOUS (Dynamic Detection)
-                # Delta Base: Anything new in the scene
                 frame_delta_base = cv2.absdiff(reference_frame, gray)
-                # Delta Prev: Anything currently moving
                 frame_delta_prev = cv2.absdiff(prev_frame, gray)
 
                 # 4. Thresholding
                 thresh_base = cv2.threshold(frame_delta_base, 25, 255, cv2.THRESH_BINARY)[1]
                 thresh_prev = cv2.threshold(frame_delta_prev, 25, 255, cv2.THRESH_BINARY)[1]
 
-                # 5. Dilation (Expanding regions)
+                # 5. Dilation
                 thresh_base = cv2.dilate(thresh_base, None, iterations=2)
 
-                # 6. Find Contours based on Base Delta (All new objects)
+                # 6. Find Contours based on Base Delta
                 contours, _ = cv2.findContours(thresh_base.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
                 detected_objects = []
 
-                # Draw the ROI (Region of Interest)
+                # Draw ROI
                 cv2.polylines(frame, [np.array(calibration_points)], True, (255, 0, 0), 2)
 
                 # 7. Process Contours
                 for i, cnt in enumerate(contours):
                     area = cv2.contourArea(cnt)
                     
-                    # Filter noise
                     if area > 800:
                         x, y, w, h = cv2.boundingRect(cnt)
                         
@@ -148,38 +156,37 @@ def run_tracking(video_source=0):
                             cx = int(M_moments["m10"] / M_moments["m00"])
                             cy = int(M_moments["m01"] / M_moments["m00"])
                             
-                            # Check if centroid is INSIDE the 4-point polygon
+                            # Check if centroid is INSIDE ROI
                             result = cv2.pointPolygonTest(np.array(calibration_points), (cx, cy), False)
                             
-                            if result >= 0: # Inside or on edge
-                                # DYNAMIC DETECTION LOGIC:
-                                # Check the ROI in the movement threshold (thresh_prev)
+                            if result >= 0: 
+                                # Motion Detection
                                 roi_motion = thresh_prev[y:y+h, x:x+w]
-                                # Calculate ratio of moving pixels in this bounding box
                                 motion_score = np.sum(roi_motion) / (w * h)
-                                
-                                is_dynamic = motion_score > 5.0 # Sensitivity threshold for movement
+                                is_dynamic = motion_score > 5.0 
                                 status = "Dynamic" if is_dynamic else "Static"
                                 
-                                # Transform to Unity Coordinates
+                                # Transform to Unity Position
                                 unity_x, unity_y = map_pixel_to_unity(M, cx, cy)
+                                
+                                # Calculate Unity Scale
+                                unity_w, unity_h = calculate_unity_scale(M, x, y, w, h)
 
                                 obj_data = {
                                     "id": i,
-                                    "x": round(float(unity_x), 2),
-                                    "y": round(float(unity_y), 2),
+                                    "pos": {"x": round(float(unity_x), 2), "y": round(float(unity_y), 2)},
+                                    "scale": {"w": unity_w, "h": unity_h},
                                     "status": status
                                 }
                                 detected_objects.append(obj_data)
 
                                 # Visualization
-                                color = (0, 0, 255) if is_dynamic else (0, 255, 0) # Red if moving, Green if static
+                                color = (0, 0, 255) if is_dynamic else (0, 255, 0)
                                 cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                                cv2.circle(frame, (cx, cy), 5, color, -1)
-                                cv2.putText(frame, f"{status}", (x, y-10), 
+                                cv2.putText(frame, f"{status} W:{unity_w} H:{unity_h}", (x, y-10), 
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-                # 8. Update Previous Frame for next iteration
+                # 8. Update Previous Frame
                 prev_frame = gray
 
                 # 9. Report & Log
@@ -195,9 +202,6 @@ def run_tracking(video_source=0):
                 
                 cv2.putText(frame, f"Total Objects: {total_objects}", (30, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-                
-                # Show debug views (optional)
-                cv2.imshow("Base Difference", thresh_base)
 
             cv2.imshow(window_name, frame)
 
