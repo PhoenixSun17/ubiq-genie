@@ -199,7 +199,8 @@ def run_tracking(video_source=0):
                 
                 # sock.sendto(udp_string.encode(), (UDP_IP, UDP_PORT))
                 writer.writerow([frame_count, total_objects, udp_string])
-                
+                # key to send over ubiq genie
+                print([frame_count, total_objects, udp_string])
                 cv2.putText(frame, f"Total Objects: {total_objects}", (30, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
