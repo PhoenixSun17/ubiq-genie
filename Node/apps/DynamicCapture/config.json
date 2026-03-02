@@ -1,8 +1,8 @@
 {
-  "name": "BaseApp",
+  "name": "DynamicCapture",
   "roomGuid": "6765c52b-3ad6-4fb0-9030-2c9a05dc4731",
   "roomserver": {
-    "joinExisting": true,
+    "joinExisting": false,
     "uri": "localhost",
     "tcp": {
       "port": 8009
