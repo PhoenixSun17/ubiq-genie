@@ -1,11 +1,11 @@
 {
-  "name": "DynamicCapture",
+  "name": "Yolo",
   "roomGuid": "6765c52b-3ad6-4fb0-9030-2c9a05dc4731",
   "roomserver": {
-    "joinExisting": false,
+    "joinExisting": true,
     "uri": "localhost",
     "tcp": {
-      "port": 8009
+      "port": 8011
     },
     "wss": {
       "port": 8010,
@@ -24,5 +24,5 @@
       "uri": "stun:stun.l.google.com:19302"
     }
   ],
-  "configurationComplete": false
+  "configurationComplete": true
 }
