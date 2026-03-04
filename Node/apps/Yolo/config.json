@@ -5,7 +5,7 @@
     "joinExisting": true,
     "uri": "localhost",
     "tcp": {
-      "port": 8011
+      "port": 8009
     },
     "wss": {
       "port": 8010,
