@@ -109,7 +109,14 @@ public class MessageReceiver : MonoBehaviour
                     // Example logic: Move object
                     transform.position = new Vector3(data.objects[0].x, 0, data.objects[0].y);
                 }
-                spawner.UpdateUIElements(result,labels);
+                if (spawner != null)
+                {
+                    spawner.UpdateUIElements(result, labels);
+                }
+                else
+                {
+                    Debug.LogWarning("MessageReceiver: 'spawner' is not assigned; cannot update UI elements.");
+                }
             }
         }
         catch (Exception e)
