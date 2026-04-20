@@ -166,6 +166,10 @@ def run_tracking(video_source=0):
                 if M is None:
                     M = calculate_perspective_matrix(calibration_points, UNITY_AREA_WIDTH, UNITY_AREA_HEIGHT)
 
+                # Calculate and draw the Unity center point (X=5.0, Y=5.0) in pixel space
+                center_px = cv2.perspectiveTransform(np.array([[[UNITY_AREA_WIDTH/2, UNITY_AREA_HEIGHT/2]]], dtype=np.float32), np.linalg.inv(M))[0][0]
+                cv2.circle(frame, (int(center_px[0]), int(center_px[1])), 8, (255, 55, 55), -1)
+
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
