@@ -1,5 +1,7 @@
 # Multi-Party Conversational Agent Sample
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 This guide provides instructions on using the Ubiq-Genie framework to create an application that enables collaborative interaction with a conversational agent in a shared environment. The agent recognizes users present in the room, responds to their queries, faces the speaker during the interaction, and uses simple gestures while communicating.
 
 ## Prerequisites

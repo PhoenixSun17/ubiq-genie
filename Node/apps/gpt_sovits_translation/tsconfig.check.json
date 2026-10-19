@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "incremental": false },
+  "include": ["./app.ts", "../../services/speech_translation/**/*.ts"],
+  "exclude": ["../../.runtime", "../../dist", "../../node_modules"]
+}

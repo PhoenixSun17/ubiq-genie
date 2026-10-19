@@ -1,6 +1,8 @@
 # Base Application
 
-This folder contains the code for the base application, which serves as a template for creating new applications using the Ubiq-Genie framework. Please refer to the [README](../README.md) to learn how to create your own applications.
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+This folder contains the code for the base application, which serves as a template for creating new applications using the Ubiq-Genie framework. Please refer to the [README](../../README.md) to learn how to create your own applications.
 
 > [!IMPORTANT]
 > Before proceeding, ensure the Ubiq-Genie framework and the necessary dependencies for this sample are correctly installed. For further details, please see the root [README](../../../README.md) file.

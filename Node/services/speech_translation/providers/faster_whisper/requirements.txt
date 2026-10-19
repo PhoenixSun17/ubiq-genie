@@ -1,0 +1,7 @@
+# Separate local ASR environment. Faster-Whisper includes the Silero v6 ONNX
+# asset; no torch/silero-vad installation or online VAD download is needed.
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+onnxruntime==1.23.2
+numpy==2.2.6
+soxr==1.0.0

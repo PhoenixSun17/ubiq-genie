@@ -1,0 +1,37 @@
+# api_v2 v2Pro inference for Mandarin Chinese and English only.
+# Based on upstream tag 20250606v2pro; optional training/FunASR and Japanese,
+# Korean, Cantonese frontend packages are omitted. jieba_fast is installed
+# separately from an approved local wheel when no official cp311 wheel exists.
+numpy<2
+scipy
+tensorboard
+librosa==0.10.2
+numba
+pytorch-lightning>=2.4
+gradio<5
+ffmpeg-python
+onnxruntime-gpu
+tqdm
+cn2an
+pypinyin
+g2p_en
+torchaudio
+sentencepiece
+transformers>=4.43,<=4.50
+peft
+chardet
+PyYAML
+psutil
+jieba
+split-lang
+fast_langdetect==0.3.1
+wordsegment
+rotary_embedding_torch
+opencc
+fastapi[standard]>=0.115.2
+x_transformers
+torchmetrics<=1.5
+pydantic<=2.10.6
+huggingface_hub>=0.13
+tokenizers>=0.13,<1
+av>=11

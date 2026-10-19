@@ -1,5 +1,7 @@
 # Voice-based Texture Generation Sample
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 This guide demonstrates how to use the Ubiq-Genie framework to create an application that generates textures based on voice commands. Users also have the option to specify target objects using ray-based selection.
 
 ## Prerequisites

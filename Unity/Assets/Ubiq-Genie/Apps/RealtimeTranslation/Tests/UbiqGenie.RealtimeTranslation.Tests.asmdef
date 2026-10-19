@@ -1,0 +1,21 @@
+{
+  "name": "UbiqGenie.RealtimeTranslation.Tests",
+  "rootNamespace": "UbiqGenie.RealtimeTranslation.Tests",
+  "references": [
+    "UbiqGenie.RealtimeTranslation.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

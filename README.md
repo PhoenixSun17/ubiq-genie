@@ -1,5 +1,7 @@
 # Welcome to Ubiq-Genie
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 ![Illustrations of two sample demos available in Ubiq-Genie](header.png)
 
 Ubiq-Genie is a framework that enables you to build server-assisted collaborative mixed reality applications with Unity using the [Ubiq](https://ubiq.online) framework. This is particularly useful for building multi-user applications that require server-side processing such as generative models, conversational agents, and real-time transcription. For more information, please refer to the [Ubiq-Genie paper](https://ubiq.online/publication/ubiq-genie/).
@@ -52,6 +54,8 @@ Use this if you want to integrate Ubiq-Genie into an existing Unity project.
 ## Documentation
 
 For more information on how to use Ubiq-Genie, please refer to the README files in the `Node` folder.
+
+Project documentation is written in English. Each README is maintained in two aligned files: `README.md` in English and `README.zh-CN.md` in Simplified Chinese.
 
 ## Samples
 

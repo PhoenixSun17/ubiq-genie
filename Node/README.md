@@ -1,5 +1,7 @@
 # Ubiq-Genie
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Ubiq-Genie is a framework that enables you to build server-assisted collaborative mixed reality applications with Unity using the [Ubiq](https://ubiq.online) framework. Ubiq-Genie has a modular architecture designed to facilitate the integration of new services and the ability to update or replace individual services without affecting the entire system. The architecture consists of three main components: the Unity scene, applications, and services.
 
 ## System Architecture

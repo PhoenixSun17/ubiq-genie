@@ -1,5 +1,7 @@
 # Transcription Sample
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 This guide provides instructions on how to use the Ubiq-Genie framework to transcribe audio streams in a room using the transcription sample. For each peer in the room, the sample records the audio stream and transcribes it using a speech-to-text provider. The transcriptions are saved to a .csv file, and the audio recordings are saved to a .wav file.
 
 By default, the sample uses the **Nemotron Streaming** provider, which runs locally on your machine using NVIDIA's NeMo toolkit (no API key required). Alternative providers such as **Azure Speech Services** are also available—some are cloud-based and require an API key.

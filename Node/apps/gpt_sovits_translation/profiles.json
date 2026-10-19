@@ -1,0 +1,16 @@
+{
+  "c22397b0-74ff-4653-b1b7-8549bdc49f8f": {
+    "refAudioPath": "recordings/my-voice-reference.wav",
+    "promptText": "For more details of the system, please refer to our paper. Thank you for watching.",
+    "promptLanguage": "en"
+  },
+    "b87aaf39-d5ae-44bb-9860-28b715e2fe43": {
+    "refAudioPath": "recordings/VoiceProfile2-reference.wav",
+    "promptText": "那我现在重新再说点啥，然后发给你，但我不知道是什么格式。",
+    "promptLanguage": "zh"
+  },"e1401076-4b2d-4f73-bd66-b61326a77325": {
+    "refAudioPath": "recordings/VoiceProfile3.wav",
+    "promptText": "four peanut butter flavour protein bars, milk chocolate with sweetener.",
+    "promptLanguage": "en"
+  }
+}
