@@ -1,10 +1,12 @@
 import { EventEmitter } from 'node:events';
+import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { basename, dirname, extname, resolve } from 'node:path';
-import type { LogFunction, VoiceProfile } from './types';
+import type { LogFunction, VoiceCatalogEntry, VoiceProfile } from './types';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VOICE_ID = /^[0-9a-f]{64}$/;
 
 async function boundedRead(path: string, maxBytes: number): Promise<Buffer> {
     const file = await open(path, 'r');
@@ -70,14 +72,20 @@ export function wavDuration(wav: Buffer): number {
     return dataBytes / byteRate;
 }
 
-function sameProfile(left: VoiceProfile | undefined, right: VoiceProfile | undefined): boolean {
-    return left?.refAudioPath === right?.refAudioPath && left?.promptText === right?.promptText &&
-        left?.promptLanguage === right?.promptLanguage;
+/** Stable across UUID keys, file ordering, and equivalent platform path spellings. */
+export function voiceProfileId(profile: VoiceProfile): string {
+    const path = resolve(profile.refAudioPath);
+    const normalizedPath = process.platform === 'win32' ? path.toLowerCase() : path;
+    return createHash('sha256').update(JSON.stringify([
+        normalizedPath, profile.promptText.trim(), profile.promptLanguage,
+    ])).digest('hex');
 }
 
 export class VoiceProfileStore extends EventEmitter {
     private readonly path: string;
     private profiles = new Map<string, VoiceProfile>();
+    private catalog = new Map<string, VoiceProfile>();
+    private readonly overrides = new Map<string, string>();
     private watcher?: FSWatcher;
     private timer?: ReturnType<typeof setTimeout>;
     private closed = false;
@@ -89,8 +97,39 @@ export class VoiceProfileStore extends EventEmitter {
     }
 
     snapshot(peerUuid: string): VoiceProfile | undefined {
-        const profile = this.profiles.get(peerUuid.toLowerCase());
+        const uuid = peerUuid.toLowerCase();
+        const selected = this.overrides.get(uuid);
+        // A deleted explicit selection must not silently fall back to a legacy UUID entry.
+        const profile = selected === undefined ? this.profiles.get(uuid) : this.catalog.get(selected);
         return profile ? { ...profile } : undefined;
+    }
+
+    listVoices(): VoiceCatalogEntry[] {
+        return [...this.catalog].map(([id, profile]) => ({
+            id,
+            name: basename(profile.refAudioPath).slice(0, 128),
+            language: profile.promptLanguage,
+        })).sort((left, right) => left.id.localeCompare(right.id));
+    }
+
+    getBoundVoiceId(peerUuid: string): string | undefined {
+        const profile = this.snapshot(peerUuid);
+        return profile ? voiceProfileId(profile) : undefined;
+    }
+
+    /** Session-only selection. Does not mutate the profiles file or other peers. */
+    bindVoice(peerUuid: string, voiceId: string): void {
+        if (this.closed) throw new Error('Voice catalog is unavailable.');
+        if (!UUID.test(peerUuid) || !VOICE_ID.test(voiceId)) throw new Error('Invalid voice selection.');
+        if (!this.catalog.has(voiceId)) throw new Error('Voice is no longer available.');
+        const uuid = peerUuid.toLowerCase();
+        const previous = this.getBoundVoiceId(uuid);
+        this.overrides.set(uuid, voiceId);
+        if (previous !== voiceId) this.emit('changed', [uuid]);
+    }
+
+    removePeer(peerUuid: string): void {
+        this.overrides.delete(peerUuid.toLowerCase());
     }
 
     async start(): Promise<void> {
@@ -120,6 +159,7 @@ export class VoiceProfileStore extends EventEmitter {
         if (this.timer) clearTimeout(this.timer);
         this.watcher?.close();
         this.watcher = undefined;
+        this.overrides.clear();
     }
 
     private async load(): Promise<boolean> {
@@ -150,11 +190,17 @@ export class VoiceProfileStore extends EventEmitter {
                 });
             }
             if (this.closed) return false;
-            const changed = [...new Set([...this.profiles.keys(), ...next.keys()])]
-                .filter((uuid) => !sameProfile(this.profiles.get(uuid), next.get(uuid)));
+            const nextCatalog = new Map<string, VoiceProfile>();
+            for (const profile of next.values()) nextCatalog.set(voiceProfileId(profile), profile);
+            const candidates = [...new Set([...this.profiles.keys(), ...next.keys(), ...this.overrides.keys()])];
+            const previous = new Map(candidates.map((uuid) => [uuid, this.getBoundVoiceId(uuid)]));
+            const removed = [...this.catalog.keys()].filter((id) => !nextCatalog.has(id));
             this.profiles = next;
+            this.catalog = nextCatalog;
+            const changed = candidates.filter((uuid) => previous.get(uuid) !== this.getBoundVoiceId(uuid));
             this.log(`Loaded ${next.size} validated voice profile(s)`);
             this.emit('changed', changed);
+            this.emit('catalogChanged', removed);
             return true;
         } catch (error) {
             this.log(`Voice profile reload rejected; keeping last valid configuration: ${error instanceof Error ? error.message : String(error)}`);

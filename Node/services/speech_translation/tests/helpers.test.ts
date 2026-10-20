@@ -7,12 +7,13 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { splitPcm, wavToPcm } from '../audio';
 import { localEndpoint, synthesize, translate } from '../clients';
-import { VoiceProfileStore, wavDuration } from '../profiles';
+import { VoiceProfileStore, voiceProfileId, wavDuration } from '../profiles';
 import { JsonLineDecoder } from '../protocol';
 import type { VoiceProfile } from '../types';
 
 const UUID_A = '12345678-1234-4123-8123-123456789abc';
 const UUID_B = 'abcdef01-1234-4123-8123-123456789abc';
+const UUID_C = 'abcdef02-1234-4123-8123-123456789abc';
 const signal = () => new AbortController().signal;
 
 function pcmWav(seconds: number, sampleRate = 16000, channels = 1): Buffer {
@@ -160,6 +161,110 @@ test('profile watcher observes atomic editor replacements', async (t) => {
     const [uuids] = await changed;
     assert.deepEqual(uuids, [UUID_A]);
     assert.equal(store.snapshot(UUID_A)?.promptText, 'Reference');
+});
+
+test('voice catalog deduplicates full validated tuples and IDs survive UUID and ordering changes', async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), 'speech-catalog-test-'));
+    const path = join(directory, 'profiles.json');
+    await writeFile(join(directory, 'voice.wav'), pcmWav(3));
+    const voice: VoiceProfile = { refAudioPath: 'voice.wav', promptText: 'Reference', promptLanguage: 'en' };
+    const store = new VoiceProfileStore(path, () => {});
+    t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
+    await writeFile(path, JSON.stringify({
+        [UUID_A]: voice,
+        [UUID_B]: { ...voice, refAudioPath: './voice.wav', promptText: ' Reference ' },
+        [UUID_C]: { ...voice, promptText: 'Different transcript' },
+    }));
+    assert.equal(await store.reload(), true);
+    const first = store.listVoices();
+    assert.equal(first.length, 2);
+    assert.ok(first.every((entry) => /^[0-9a-f]{64}$/.test(entry.id)));
+    assert.ok(first.every((entry) => entry.name === 'voice.wav' && entry.language === 'en'));
+    assert.deepEqual(Object.keys(first[0]).sort(), ['id', 'language', 'name']);
+    assert.equal(store.getBoundVoiceId(UUID_A), store.getBoundVoiceId(UUID_B));
+    assert.notEqual(store.getBoundVoiceId(UUID_A), store.getBoundVoiceId(UUID_C));
+    assert.notEqual(
+        voiceProfileId({ ...voice, refAudioPath: join(directory, 'voice.wav'), promptLanguage: 'zh' }),
+        store.getBoundVoiceId(UUID_A),
+    );
+    await writeFile(path, JSON.stringify({
+        [UUID_B]: { ...voice, promptText: 'Different transcript' },
+        [UUID_C]: { ...voice, refAudioPath: join(directory, 'voice.wav') },
+    }));
+    assert.equal(await store.reload(), true);
+    assert.deepEqual(store.listVoices(), first);
+    first[0].name = 'Do not mutate the catalog';
+    assert.equal(store.listVoices()[0].name, 'voice.wav');
+});
+
+test('session voice choices override legacy UUIDs, remain isolated, and disappear on departure', async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), 'speech-binding-test-'));
+    const path = join(directory, 'profiles.json');
+    await writeFile(join(directory, 'a.wav'), pcmWav(3));
+    await writeFile(join(directory, 'b.wav'), pcmWav(3));
+    const a: VoiceProfile = { refAudioPath: 'a.wav', promptText: 'A', promptLanguage: 'en' };
+    const b: VoiceProfile = { refAudioPath: 'b.wav', promptText: 'B', promptLanguage: 'zh' };
+    await writeFile(path, JSON.stringify({ [UUID_A]: a, [UUID_B]: b }));
+    const store = new VoiceProfileStore(path, () => {});
+    t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
+    assert.equal(await store.reload(), true);
+    const aId = store.getBoundVoiceId(UUID_A)!;
+    const bId = store.getBoundVoiceId(UUID_B)!;
+    const changes: string[][] = [];
+    store.on('changed', (uuids: string[]) => changes.push(uuids));
+    store.bindVoice(UUID_A, bId);
+    store.bindVoice(UUID_C, aId);
+    store.bindVoice(UUID_A, bId);
+    assert.deepEqual(changes, [[UUID_A], [UUID_C]], 'repeating a selection must not reset live capture');
+    assert.equal(store.snapshot(UUID_A)?.promptText, 'B');
+    assert.equal(store.snapshot(UUID_B)?.promptText, 'B');
+    assert.equal(store.snapshot(UUID_C)?.promptText, 'A');
+    assert.throws(() => store.bindVoice(UUID_A, 'invalid'), /Invalid voice selection/);
+    assert.throws(() => store.bindVoice('not-a-uuid', aId), /Invalid voice selection/);
+    assert.throws(() => store.bindVoice(UUID_A, '0'.repeat(64)), /no longer available/);
+    assert.equal(store.getBoundVoiceId(UUID_A), bId);
+    store.removePeer(UUID_A);
+    store.removePeer(UUID_C);
+    assert.equal(store.getBoundVoiceId(UUID_A), aId, 'legacy mapping remains compatible after override cleanup');
+    assert.equal(store.snapshot(UUID_C), undefined);
+    store.close();
+    assert.throws(() => store.bindVoice(UUID_A, aId), /unavailable/);
+});
+
+test('catalog reload is atomic and a deleted selection cannot fall back to a legacy voice', async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), 'speech-catalog-reload-'));
+    const path = join(directory, 'profiles.json');
+    await writeFile(join(directory, 'a.wav'), pcmWav(3));
+    await writeFile(join(directory, 'b.wav'), pcmWav(3));
+    const a: VoiceProfile = { refAudioPath: 'a.wav', promptText: 'A', promptLanguage: 'en' };
+    const b: VoiceProfile = { refAudioPath: 'b.wav', promptText: 'B', promptLanguage: 'en' };
+    await writeFile(path, JSON.stringify({ [UUID_A]: a, [UUID_B]: b }));
+    const store = new VoiceProfileStore(path, () => {});
+    t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
+    const catalogs: string[][] = [];
+    store.on('catalogChanged', (removed: string[]) => catalogs.push(removed));
+    assert.equal(await store.reload(), true);
+    const bId = store.getBoundVoiceId(UUID_B)!;
+    store.bindVoice(UUID_A, bId);
+    store.bindVoice(UUID_C, bId);
+    await writeFile(path, JSON.stringify({ [UUID_A]: { ...a, refAudioPath: 'missing.wav' } }));
+    assert.equal(await store.reload(), false);
+    assert.equal(catalogs.length, 1);
+    assert.equal(store.getBoundVoiceId(UUID_A), bId);
+    const changes: string[][] = [];
+    store.on('changed', (uuids: string[]) => changes.push(uuids));
+    await writeFile(path, JSON.stringify({ [UUID_A]: a }));
+    assert.equal(await store.reload(), true);
+    assert.deepEqual(catalogs[1], [bId]);
+    assert.deepEqual(new Set(changes[0]), new Set([UUID_A, UUID_B, UUID_C]));
+    assert.equal(store.snapshot(UUID_A), undefined, 'an explicit missing voice suppresses the existing legacy entry');
+    assert.equal(store.snapshot(UUID_C), undefined);
+    assert.equal(store.getBoundVoiceId(UUID_A), undefined);
+    assert.equal(await store.reload(), true);
+    assert.equal(catalogs.length, 3, 'every successful reload refreshes connected selectors');
+    assert.deepEqual(catalogs[2], []);
+    store.bindVoice(UUID_A, store.listVoices()[0].id);
+    assert.equal(store.snapshot(UUID_A)?.promptText, 'A');
 });
 
 test('local service origins reject remote destinations, credentials, and embedded paths', () => {

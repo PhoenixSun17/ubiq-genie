@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
-import type { NetworkScene } from 'ubiq-server/ubiq';
+import type { NetworkScene } from '@ucl-vr/ubiq';
 import { readTranslationConfig } from '../config';
 import { SpeechTranslationService } from '../service';
 import { GptSovitsTranslation } from '../../../apps/gpt_sovits_translation/app';
@@ -60,6 +63,28 @@ function harness(t: TestContext) {
     return { service, internal, profiles, commands, broadcasts, logs, emit, utterance, transcript, requested, socket, scene };
 }
 
+/** Load real validated profiles while retaining the in-memory model and network transports. */
+async function catalogHarness(t: TestContext) {
+    const h = harness(t);
+    const directory = await mkdtemp(join(tmpdir(), 'speech-scheduler-catalog-'));
+    const path = join(directory, 'profiles.json');
+    const wav = Buffer.alloc(44 + 3 * 16000 * 2);
+    wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
+    await writeFile(join(directory, 'a.wav'), wav);
+    await writeFile(join(directory, 'b.wav'), wav);
+    const mapping = Object.fromEntries(h.profiles);
+    await writeFile(path, JSON.stringify(mapping));
+    delete h.internal.profiles.snapshot;
+    h.internal.profiles.path = path;
+    assert.equal(await h.internal.profiles.reload(), true);
+    t.after(async () => { await rm(directory, { recursive: true, force: true }); });
+    h.commands.length = 0;
+    return { ...h, path, mapping };
+}
+
 test('scheduler preserves sentence order and rejects the newest sentence beyond eight waiting jobs', async (t) => {
     const h = harness(t);
     for (let i = 0; i < 10; i++) h.utterance(`job-${i}`, i % 2 ? B : A);
@@ -109,6 +134,104 @@ test('voice updates keep queued snapshots and removing a profile cancels its pen
     for (const id of ['old-a', 'new-a']) {
         assert.ok(h.commands.some((command) => command.type === 'discard' && command.requestId === id));
     }
+});
+
+test('service binding resets only the changed peer and preserves active and queued voice snapshots', async (t) => {
+    const h = await catalogHarness(t);
+    const oldId = h.service.getBoundVoiceId(A)!;
+    const nextId = h.service.getBoundVoiceId(B)!;
+    h.utterance('active-a');
+    h.utterance('old-a');
+    const active = h.internal.active;
+    const queued = h.internal.queue[0];
+    h.service.bindVoice(A, nextId);
+    h.utterance('new-a');
+    assert.equal(h.service.getBoundVoiceId(A), nextId);
+    assert.equal(h.service.getBoundVoiceId(B), nextId);
+    assert.equal(active.voiceId, oldId);
+    assert.equal(queued.voiceId, oldId);
+    assert.equal(h.internal.queue[1].voiceId, nextId);
+    assert.equal(active.controller.signal.aborted, false);
+    assert.equal(queued.controller.signal.aborted, false);
+    assert.deepEqual(h.commands.filter((command) => command.type === 'reset_peer').map((command) => command.peerUuid), [A]);
+    h.service.bindVoice(A, nextId);
+    assert.equal(h.commands.filter((command) => command.type === 'reset_peer').length, 1);
+    h.transcript('active-a');
+    await nextTurn();
+    h.transcript('old-a');
+    await nextTurn();
+    h.transcript('new-a');
+    await nextTurn();
+    assert.deepEqual(h.requested(), ['active-a', 'old-a', 'new-a']);
+});
+
+test('deleting a catalog voice cancels its snapshots even after the peer selected another voice', async (t) => {
+    const h = await catalogHarness(t);
+    const nextId = h.service.getBoundVoiceId(B)!;
+    h.utterance('active-old-a');
+    h.utterance('queued-old-a');
+    const active = h.internal.active;
+    h.service.bindVoice(A, nextId);
+    h.utterance('queued-new-a');
+    h.utterance('queued-b', B);
+    let catalogEvents = 0;
+    h.service.on('voiceCatalogChanged', () => { catalogEvents++; });
+    await writeFile(h.path, JSON.stringify({ [B]: h.mapping[B] }));
+    assert.equal(await h.internal.profiles.reload(), true);
+    assert.equal(catalogEvents, 1);
+    assert.equal(active.controller.signal.aborted, true);
+    assert.deepEqual(h.internal.queue.map((job: { requestId: string }) => job.requestId), ['queued-new-a', 'queued-b']);
+    assert.equal(h.service.getBoundVoiceId(A), nextId, 'the new selected voice remains available');
+    assert.ok(h.commands.some((command) => command.type === 'discard' && command.requestId === 'queued-old-a'));
+    h.transcript('active-old-a', A, 'Late transcript');
+    await nextTurn();
+    assert.deepEqual(h.requested(), ['active-old-a', 'queued-new-a']);
+    assert.equal(h.broadcasts.length, 0);
+    h.transcript('queued-new-a');
+    await nextTurn();
+    h.transcript('queued-b', B);
+    await nextTurn();
+});
+
+test('missing selected voices reset capture and cancel jobs without falling back to legacy profiles', async (t) => {
+    const h = await catalogHarness(t);
+    h.service.bindVoice(A, h.service.getBoundVoiceId(B)!);
+    h.utterance('active-selected');
+    h.utterance('queued-selected');
+    const active = h.internal.active;
+    h.commands.length = 0;
+    await writeFile(h.path, JSON.stringify({ [A]: h.mapping[A] }));
+    assert.equal(await h.internal.profiles.reload(), true);
+    assert.equal(h.service.getBoundVoiceId(A), undefined);
+    assert.equal(h.internal.profiles.snapshot(A), undefined);
+    assert.equal(active.controller.signal.aborted, true);
+    assert.equal(h.internal.queue.length, 0);
+    assert.ok(h.commands.some((command) => command.type === 'reset_peer' && command.peerUuid === A));
+    h.service.acceptAudio(A, { samples: new Int16Array([1, 2]), sampleRate: 16000, channelCount: 1, bitsPerSample: 16 });
+    assert.equal(h.commands.filter((command) => command.type === 'audio').length, 0);
+    h.transcript('active-selected', A, 'Late transcript');
+    await nextTurn();
+    assert.equal(h.broadcasts.length, 0);
+});
+
+test('binding rejects unavailable peers, IDs and lifecycle states; leaving clears session overrides', async (t) => {
+    const h = await catalogHarness(t);
+    const aId = h.service.getBoundVoiceId(A)!;
+    const bId = h.service.getBoundVoiceId(B)!;
+    assert.throws(() => h.service.bindVoice('unknown-peer', aId), /no longer in this room/);
+    assert.throws(() => h.service.bindVoice(A, 'invalid'), /Invalid voice selection/);
+    assert.throws(() => h.service.bindVoice(A, '0'.repeat(64)), /no longer available/);
+    h.internal.workerReady = false;
+    assert.throws(() => h.service.bindVoice(A, bId), /not ready/);
+    h.internal.workerReady = true;
+    h.service.bindVoice(A, bId);
+    assert.equal(h.service.getBoundVoiceId(A), bId);
+    h.service.removePeer(A);
+    assert.throws(() => h.service.bindVoice(A, bId), /no longer in this room/);
+    h.service.addPeer(A);
+    assert.equal(h.service.getBoundVoiceId(A), aId);
+    h.service.close();
+    assert.throws(() => h.service.bindVoice(A, bId), /not ready/);
 });
 
 test('an ASR failure or unsupported language does not block the next sentence', async (t) => {

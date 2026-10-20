@@ -66,8 +66,10 @@ function Start-OwnedProcess {
         Remove-Item -LiteralPath $pidFile
     }
     $quoted = @($Arguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' })
-    $process = Start-Process -FilePath $Executable -ArgumentList $quoted -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $RuntimeRoot "logs\$Name.out.log") -RedirectStandardError (Join-Path $RuntimeRoot "logs\$Name.err.log")
-    @{pid=$process.Id; path=$process.Path; startTime=$process.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding UTF8
+    $executablePath = (Get-Item -LiteralPath $Executable -ErrorAction Stop).FullName
+    $process = Start-Process -FilePath $executablePath -ArgumentList $quoted -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $RuntimeRoot "logs\$Name.out.log") -RedirectStandardError (Join-Path $RuntimeRoot "logs\$Name.err.log")
+    # Process.Path can still be null immediately after Start-Process on Windows.
+    @{pid=$process.Id; path=$executablePath; startTime=$process.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding UTF8
     return $process
 }
 function Stop-OwnedProcess {

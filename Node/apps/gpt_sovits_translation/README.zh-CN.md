@@ -6,18 +6,19 @@
 
 本 app 是新增实现，沿用 [Node 架构](../../README.zh-CN.md) 的 ApplicationController、VoipReceiver 和 ServiceController；后端实现不修改已有 app、共享服务或共享 Unity 代码。
 
-**RealtimeTranslation 场景请参阅 [Unity 接线说明（英文）](../../../Unity/Assets/Apps/RealtimeTranslation/INTEGRATION.md)。** 该场景使用新增的 `SoVITSReceiver` 和按输入采样率播放的 `SoVITSAudioSource`；下文另行标明旧版 ConversationalAgent 播放器的设置。
+**RealtimeTranslation 场景请参阅 [Unity 接线说明（英文）](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/INTEGRATION.md)。** 该场景使用 `SoVITSReceiver`、按输入采样率播放的 `SoVITSAudioSource`，以及在 Unity Inspector 中为本机用户选择音色的 `SoVITSVoiceSelector`；下文另行标明旧版 ConversationalAgent 播放器的设置。
 
 ## 当前验证状态
 
 - 实现与环境安装记录分开管理。实际安装结果见运行目录的 `asr-manifest.json`、`receipts/` 和 `logs/`。
 - 本机已完成两个独立 Python 3.11 环境、所列模型和工具的安装；两个环境的 `pip check` 均通过。模型文件按固定上游 revision 校验，安装版本与哈希已写入回执。
-- 已获准并运行无模型单元测试：Python worker **19 项通过**；Node helpers **13 项通过**（含实际 FFmpeg 转换）；调度器与 app 生命周期 **8 项通过**。Node 的 localhost 模拟测试在隔离环境外运行，因为隔离环境禁止了回环连接和临时文件替换。
-- 完整 app 类型检查目前有 **1 个既有错误**：`components/application.ts:33` 引用了两份不同的 Ubiq `NetworkScene` 类型。对原有 base app 的独立基线检查复现同一诊断；新文件没有新增类型诊断，未修改共享组件或已有依赖。
+- 2026-10-20，app 类型检查及 **36 项 Node 测试全部通过**：helpers 16 项（含实际 FFmpeg 转换）、调度器／app 12 项、音色绑定协议 8 项。localhost 模拟测试在隔离环境外运行，因为隔离环境禁止了回环连接和临时文件替换。此前 **19 项 Python worker 测试通过**为历史结果；本次音色选择未修改 Python。
+- 当前 app 类型检查通过。全仓库构建仍受 `dynamic_capture_yolo` 和 `yolo_only_capture` 中旧 `ubiq-server/ubiq` 导入阻挡；针对修改文件的 ESLint 因现有 `.eslintrc.json` 格式错误而无法启动。这些无关文件未修改。
 - RealtimeTranslation 接收器已通过 Unity **6000.0.61f1** 编译及 **52/52 个 EditMode 无模型测试**。2026-10-13 获准现场诊断，已确认 Unity 麦克风音频到达 Node、VAD 切句及中文 ASR 成功。翻译失败的原因是可变标签 `qwen3:4b` 指向 Thinking 2507；修正模型见下文。
 - 修正后，原翻译客户端在关闭 thinking 时返回了纯中文译文（含首次加载 22.229 秒）。另行调用 GPT-SoVITS，使用用户参考音色生成了有效的 4.08 秒、32 kHz 单声道 PCM16 英文 WAV（含首次处理 51.396 秒）。这些组件检查不代表 Unity 已经播放，也不代表预热后的延迟。
-- 本地已准备 5.50 秒英文参考片段 `recordings/my-voice-reference.wav`，并自动转写匹配文字。当前音色配置绑定的是会话 UUID，重启 Unity 后必须重新核对；未配置用户的输入被忽略。
-- 按用户要求，诊断 Node／ASR 已在修正后的完整现场播放验证前停止。音色质量、Unity 实际播放、双用户联调、峰值显存及端到端延迟仍待验证；后续实测继续遵守项目授权要求。
+- 本地已准备 5.50 秒英文参考片段 `recordings/my-voice-reference.wav`，并自动转写匹配文字。手工文件绑定仍需核对当前会话 UUID；Inspector 选择会在后端确认后为新 UUID 恢复已记住的音色。
+- 2026-10-19，修正中文参考录音后，用户已确认听到清晰译音。双用户联调、峰值显存及新增 Inspector 流程仍待现场验证；后续实测继续遵守项目授权要求。
+- 2026-10-20，Unity **6000.0.61f1** 编译通过，**77/77 项 EditMode 测试通过**：PCM 52 项、音色选择状态 25 项。测试覆盖选择、确认匹配、恢复、失效和错误状态，不加载模型或连接房间；实际 Inspector 操作及跨 Editor 重启的 PlayerPrefs 保存仍待运行验证。结果见 [接线说明](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/INTEGRATION.md)。
 
 ## 架构与模型
 
@@ -76,6 +77,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\apps\gpt_sovits_translatio
 npm.cmd start gpt_sovits_translation
 ```
 
+等待出现 `Both backend HTTP endpoints are ready` 后再启动 Node。启动脚本为每个后端最多等待 10 分钟；若进程退出或 HTTP 接口持续不可用，会报错并显示日志路径。这些就绪检查不执行翻译或语音合成。
+
 首次启动沿用项目 CLI 的 Ubiq 服务器配置流程。`config.json` 的房间 GUID 和服务器地址必须与 Unity 客户端一致。若需重新配置：
 
 ```powershell
@@ -96,16 +99,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\apps\gpt_sovits_translatio
 
 ## Unity 播放设置
 
-使用 `Unity/Assets/Apps/RealtimeTranslation/RealtimeTranslation.unity` 时，按 [Unity 接线说明](../../../Unity/Assets/Apps/RealtimeTranslation/INTEGRATION.md) 配置。该场景已接入 Nexus（`nexus.cs.ucl.ac.uk:8009`）和房间 `6765c52b-3ad6-4fb0-9030-2c9a05dc4731`。保持 Node 的 `translation.outputSampleRate` 与 `SoVITSAudioSource.sourceSampleRate` 一致，默认均为 **16000**。Unity 负责转换到设备输出采样率，不需要把该播放器的源采样率改成声卡频率。
+使用 `Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/RealtimeTranslation.unity` 时，按 [Unity 接线说明](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/INTEGRATION.md) 配置。该场景已接入 Nexus（`nexus.cs.ucl.ac.uk:8009`）和房间 `6765c52b-3ad6-4fb0-9030-2c9a05dc4731`。保持 Node 的 `translation.outputSampleRate` 与 `SoVITSAudioSource.sourceSampleRate` 一致，默认均为 **16000**。Unity 负责转换到设备输出采样率，不需要把该播放器的源采样率改成声卡频率。
 
-旧版兼容路径：使用现有 `Unity/Assets/Apps/ConversationalAgent/ConversationalAgent.unity` 场景，或已经配置好 `ConversationalAgentManager` 与 `InjectableAudioSource` 的场景。仅对此旧播放器，Node 输出必须与 Unity 实际 `AudioSettings.outputSampleRate` 一致；默认 **16000** 匹配当前 `Unity/ProjectSettings/AudioManager.asset`，联调时应查看 Unity 的 `Output sample rate` 日志。普通 Transcription 场景不自动具备音频接收器。
+旧版兼容路径：使用现有 `Unity/Assets/Ubiq-Genie/Apps/ConversationalAgent/ConversationalAgent.unity` 场景，或已经配置好 `ConversationalAgentManager` 与 `InjectableAudioSource` 的场景。仅对此旧播放器，Node 输出必须与 Unity 实际 `AudioSettings.outputSampleRate` 一致；默认 **16000** 匹配当前 `Unity/ProjectSettings/AudioManager.asset`，联调时应查看 Unity 的 `Output sample rate` 日志。普通 Transcription 场景不自动具备音频接收器。
 
 - 不同时启动向同一房间 `NetworkId(95)` 发送音频的其他助手 app，否则流会混合。
 - 每位成员都会听到原声及之后的译音，包括说话者本人；译音来自现有助手音源，不是每位用户头像的位置。
 - `targetPeer` 固定为空，仅为兼容既有音频头，不表示定向发送。音频头少于 100 字节，PCM 包为 200–16000 字节，末尾不补零、不截断。
 - 使用耳机避免扬声器译音再次进入麦克风。此版本不增加回声消除或原声静音控制。
 
-## 按会话 UUID 配置音色
+## 在 Unity Inspector 中选择音色
+
+RealtimeTranslation 场景的现有 `Ubiq-Genie/SoVITSReceiver` 对象上挂有 `SoVITSVoiceSelector`。其自定义 Inspector 自动显示本机客户端当前 UUID，仅为本机用户选择音色；没有新增游戏内或 VR 选择界面。
+
+获准运行验证后：
+
+1. 在同一房间启动 Node app，并进入 Unity Play 模式。
+2. 选中 `Ubiq-Genie/SoVITSReceiver`，找到 `SoVITSVoiceSelector` Inspector，等待单个 Node 后端发布音色目录。
+3. 从下拉列表选择参考音色；条目显示录音文件名和语言。然后点击 **Apply Voice**。
+4. 等待 Node 返回与本次请求匹配、状态为 `bound` 的确认。等待中的请求不代表绑定成功；只有收到该确认才会将音色 ID 保存至本地 `PlayerPrefs`，按 Unity 项目和房间隔离。
+
+Node 从 `profiles.json`（或 `translation.profilesPath`）中通过校验的条目生成目录。完整 `(refAudioPath, promptText, promptLanguage)` 三元组相同的条目共享一个 SHA-256 音色 ID 和下拉选项，即使它们使用不同的 UUID 键。原有 UUID 文件及其格式保留不变，选择操作不会重写文件。有效配置为空时，没有可选音色，也不会选择默认音色。
+
+确认后的选择成为当前 UUID 的内存覆盖配置，优先于该 UUID 的文件映射。没有通过 Inspector 选择的客户端（包括旧场景）继续使用原有 UUID 绑定方式。正常切换音色只影响新句子，排队中的句子保留原音色快照。
+
+UUID 变化、再次进入 Play 或 Node 重启后，当单个兼容后端和同一音色 ID 可用时，会自动重新请求上次确认的选择。恢复仍须收到新的确认，已保存的偏好不代表当前会话已绑定。修改参考路径、文字或语言会改变音色 ID，需要重新选择。所选音色从发布目录消失时，相关内存覆盖失效，受影响的待处理任务取消；选择器不会猜测替代音色。
+
+后端离线、存在多个后端、已保存音色缺失或请求被拒绝时，Inspector 会显示错误；解决所报告的问题后再应用或恢复。选择请求、确认及小型音色目录通过现有 Ubiq peer properties 经 Nexus 传递。仅交换音色 ID、显示标签／语言和绑定元数据；WAV、完整路径和参考文字留在 Node 本机。这不增加通道 95 音频消息格式，也不改变 Python／模型接口。
+
+## 配置参考音色与旧版 UUID 绑定
 
 用户加入后，Node 会显示 `Peer UUID: ...; name: ...`。把该 **UUID** 作为 `profiles.json` 的键，参考 `profiles.example.json` 的结构填写：
 
@@ -126,11 +148,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\apps\gpt_sovits_translatio
 - 路径可使用绝对路径，或者相对于 `profiles.json` 的路径；Windows JSON 路径建议使用 `/`，或者将 `\` 写为 `\\`。
 - 路径必须能由本机 GPT-SoVITS 进程读取；该 API 使用服务器文件路径，不上传音频。
 
-保存后热重载：整份配置验证成功才替换当前配置；编辑到一半的无效 JSON 或错误录音会被拒绝并保留上一份有效配置。排队中的句子保留原音色快照，新句子使用新配置。删除某个用户的配置会取消其待处理任务。初始配置无效时 app 不启动。
+保存后热重载：整份配置验证成功才替换当前配置；编辑到一半的无效 JSON 或错误录音会被拒绝并保留上一份有效配置。排队中的句子保留原音色快照，新句子使用新配置。删除用户实际生效的音色绑定会取消其待处理任务；目录中的音色被移除也会使相关 Inspector 覆盖失效。初始配置无效时 app 不启动。
 
 用户离房会取消待处理句子和播放。如果后端已开始计算，会等待当前请求完成后丢弃其结果，再处理下一句；HTTP 连接中断本身不能保证后端 GPU 立即停止。每次后端请求仍有配置的超时上限。
 
-UUID 是当前连接身份，重启客户端或重新加入后可能改变，需要重新绑定；显示名不参与匹配。`profiles.json` 留空时不选择默认音色。如果希望把个人映射排除在版本控制之外，可把 `translation.profilesPath` 改为已被忽略的 `./profiles.local.json`。
+UUID 是当前连接身份，重启客户端或重新加入后可能改变。手动文件绑定需要更新 UUID；Inspector 则为新 UUID 请求恢复上次确认的音色。显示名不参与匹配。`profiles.json` 留空时不选择默认音色。如果希望把个人映射排除在版本控制之外，可把 `translation.profilesPath` 改为已被忽略的 `./profiles.local.json`。
 
 ## 日志与故障处理
 
@@ -149,7 +171,9 @@ Unity 的 Ubiq 使用 Windows 默认录音设备。本地默认不回放自己�
 
 | 现象 | 检查 |
 | --- | --- |
-| 只出现 UUID，无译音 | 当前 UUID 是否存在于有效 profiles 文件，录音路径和文字是否正确 |
+| 只出现 UUID，无译音 | 当前会话是否收到 Inspector 的 `bound` 确认，或当前 UUID 是否存在有效文件映射；检查参考录音和文字 |
+| Inspector 无法应用音色 | 查看状态：Node 需在同一房间在线，只能有一个兼容后端发布目录，所选音色需仍然存在 |
+| 重连后已保存音色缺失 | 检查已校验参考路径、文字或语言是否变化；重新选择当前目录条目并等待新的 `bound` 确认 |
 | 初始音色校验失败 | 是否错误复制了未填写的 example；录音是否在 3–10 秒内 |
 | `/api/chat` 或 `/tts` 连接失败 | 启动后端，核对回环地址和端口，查看后端日志 |
 | CUDA DLL / CTranslate2 错误 | 独立环境与 CUDA 运行库是否完整，检查安装记录；不自动切 CPU |
@@ -178,6 +202,7 @@ node --loader ts-node/esm --test .\services\speech_translation\tests\helpers.tes
 1. 两名用户分别提供参考录音，检查中文→英文、英文→中文及用户音色匹配。
 2. 检查双人并发、离房取消、缺失参考文件、未知语言、空识别、后端停机恢复和队列过载。
 3. 在实际 VR 场景中检查 CUDA 放置、峰值显存、每阶段耗时与端到端播放延迟，并核实音频无截断、变速和重复。
+4. 检查 Inspector 选择收到确认后才保存、新 UUID 和 Node 重启后的自动恢复、音色缺失／变化、多后端错误及两名客户端独立选择。上述历史测试未验证这些新增选择行为。
 
 获准实测后，可在另一个终端采集 GPU 时间序列，与 Node 每句的 `requestId`、耗时日志对应；当前尚无实测数据：
 

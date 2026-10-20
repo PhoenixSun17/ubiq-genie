@@ -1,3 +1,4 @@
+using Ubiq.Genie.Samples.ConversationalAgent;
 using Ubiq.Messaging;
 using Ubiq.Rooms;
 using UnityEngine;

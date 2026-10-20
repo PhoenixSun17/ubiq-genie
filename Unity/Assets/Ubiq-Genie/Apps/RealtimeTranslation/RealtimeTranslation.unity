@@ -240,6 +240,7 @@ GameObject:
   m_Component:
   - component: {fileID: 275137086}
   - component: {fileID: 275137087}
+  - component: {fileID: 275137088}
   m_Layer: 0
   m_Name: SoVITSReceiver
   m_TagString: Untagged
@@ -277,6 +278,20 @@ MonoBehaviour:
   audioSource: {fileID: 324895636}
   assistantController: {fileID: 324895633}
   volume: {fileID: 324895634}
+--- !u!114 &275137088
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 275137085}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ca7aeaac1b494304aa347c0a3cd71f1d, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  roomClient: {fileID: 8839457145026391853}
+  restorePreviousVoice: 1
 --- !u!1001 &760390091
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -483,7 +498,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 31236ae480c068b47b3b029b89d511ba, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Guid: {fileID: 11400000, guid: 414ee18d2da694c8a9fafb3dc4c3bc49, type: 2}
+  Guid: {fileID: 11400000, guid: 33563f748cb946cf80c29960a4e3ec5a, type: 2}
   networkScene: {fileID: 8839457145026391852}
   roomClient: {fileID: 8839457145026391853}
   joinOnStart: 1

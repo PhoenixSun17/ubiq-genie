@@ -4,21 +4,26 @@ import { ApplicationController } from '../../components/application';
 import { VoipReceiver } from '../../components/voip_receiver';
 import { SpeechTranslationService } from '../../services/speech_translation/service';
 import { readTranslationConfig } from '../../services/speech_translation/config';
+import { VoiceBindingController } from '../../services/speech_translation/voice_binding';
 
 class GptSovitsTranslation extends ApplicationController {
     private translation!: SpeechTranslationService;
+    private voiceBindings?: VoiceBindingController;
 
     async start(): Promise<void> {
         this.registerComponents();
         this.definePipeline();
         await this.translation.start();
+        this.voiceBindings = new VoiceBindingController(this.roomClient, this.translation,
+            (message) => this.log(message));
         await this.joinRoom();
         this.connection.onClose.push(() => {
             this.log('Ubiq connection closed; stopping translation and discarding pending speech.', 'warning');
+            this.voiceBindings?.close();
             this.translation.close();
             process.exit(1);
         });
-        this.log('Waiting for peers. Bind their current UUIDs in profiles.json to enable translation.');
+        this.log('Waiting for peers. Select a voice in Unity SoVITSVoiceSelector, or bind a UUID in profiles.json.');
     }
 
     registerComponents(): void {
@@ -45,12 +50,14 @@ class GptSovitsTranslation extends ApplicationController {
         });
         this.roomClient.on('OnJoinRejected', (reason: unknown) => {
             this.log(`Ubiq room join rejected: ${String(reason)}`, 'error');
+            this.voiceBindings?.close();
             this.translation.close();
             process.exit(1);
         });
         for (const peer of this.roomClient.peers.values()) addPeer(peer);
         this.translation.on('fatal', (error: Error) => {
             this.log(error.message, 'error');
+            this.voiceBindings?.close();
             this.translation.close();
             process.exit(1);
         });

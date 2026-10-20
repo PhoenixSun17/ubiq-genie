@@ -1,15 +1,15 @@
 import fs from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
-import { NetworkId, NetworkScene } from 'ubiq-server/ubiq';
+import { NetworkId, NetworkScene } from '@ucl-vr/ubiq';
 import { ServiceController } from '../../components/service';
 import type { SpeechTranslationConfig } from './config';
 import { createWhisperProvider } from './provider';
-import { VoiceProfileStore } from './profiles';
+import { VoiceProfileStore, voiceProfileId } from './profiles';
 import { JsonLineDecoder } from './protocol';
 import { translate, synthesize } from './clients';
 import { splitPcm, wavToPcm } from './audio';
-import type { Language, VoiceProfile } from './types';
+import type { Language, VoiceCatalogEntry, VoiceProfile } from './types';
 
 interface Job {
     requestId: string;
@@ -17,6 +17,7 @@ interface Job {
     endedAt: number;
     durationMs: number;
     voice: VoiceProfile;
+    voiceId: string;
     controller: AbortController;
 }
 
@@ -77,6 +78,11 @@ export class SpeechTranslationService extends ServiceController {
                 this.log(`Voice profile ${this.profiles.snapshot(uuid) ? 'available/updated' : 'removed'} for ${uuid}`);
             }
         });
+        this.profiles.on('catalogChanged', (removedVoiceIds: string[]) => {
+            const removed = new Set(removedVoiceIds);
+            this.cancelJobs((job) => removed.has(job.voiceId));
+            this.emit('voiceCatalogChanged');
+        });
     }
 
     async start(): Promise<void> {
@@ -120,8 +126,23 @@ export class SpeechTranslationService extends ServiceController {
         if (!this.profiles.snapshot(uuid)) this.warnOnce(`profile:${uuid}`, `No voice profile for ${uuid}; audio ignored until configured.`);
     }
 
+    listVoices(): VoiceCatalogEntry[] {
+        return this.profiles.listVoices();
+    }
+
+    getBoundVoiceId(peerUuid: string): string | undefined {
+        return this.profiles.getBoundVoiceId(peerUuid);
+    }
+
+    bindVoice(peerUuid: string, voiceId: string): void {
+        if (this.stopped || !this.workerReady) throw new Error('Translation service is not ready.');
+        if (!this.peers.has(peerUuid)) throw new Error('Peer is no longer in this room.');
+        this.profiles.bindVoice(peerUuid, voiceId);
+    }
+
     removePeer(uuid: string): void {
         this.peers.delete(uuid);
+        this.profiles.removePeer(uuid);
         this.inputStats.delete(uuid);
         this.cancelPeerJobs(uuid);
         this.send({ type: 'remove_peer', peerUuid: uuid });
@@ -279,7 +300,10 @@ export class SpeechTranslationService extends ServiceController {
             this.log(`Dropped ${requestId} (${peerUuid}): ${reason}.`, 'warning');
             return;
         }
-        this.queue.push({ requestId, peerUuid, endedAt, durationMs, voice, controller: new AbortController() });
+        this.queue.push({
+            requestId, peerUuid, endedAt, durationMs, voice, voiceId: voiceProfileId(voice),
+            controller: new AbortController(),
+        });
         this.diagnostic(`Utterance ${requestId} (${peerUuid}): ${durationMs} ms; queued for ASR.`);
         void this.drain();
     }
@@ -411,14 +435,18 @@ export class SpeechTranslationService extends ServiceController {
     }
 
     private cancelPeerJobs(uuid: string): void {
+        this.cancelJobs((job) => job.peerUuid === uuid);
+    }
+
+    private cancelJobs(matches: (job: Job) => boolean): void {
         for (let index = this.queue.length - 1; index >= 0; index--) {
             const job = this.queue[index];
-            if (job.peerUuid !== uuid) continue;
+            if (!matches(job)) continue;
             job.controller.abort();
             this.send({ type: 'discard', requestId: job.requestId });
             this.queue.splice(index, 1);
         }
-        if (this.active?.peerUuid === uuid) {
+        if (this.active && matches(this.active)) {
             this.active.controller.abort();
             this.send({ type: 'discard', requestId: this.active.requestId });
             // Await an in-flight ASR's terminal response before admitting another GPU job.

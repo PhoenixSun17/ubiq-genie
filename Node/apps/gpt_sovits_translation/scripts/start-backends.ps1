@@ -23,6 +23,30 @@ function Assert-PortAvailableOrOwned {
     }
 }
 
+function Wait-BackendReady {
+    param([string]$Name, [System.Diagnostics.Process]$Process, [string]$Uri, [int]$TimeoutSeconds = 600)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $logPath = Join-Path $RuntimeRoot "logs\$Name.err.log"
+    Write-Host "Waiting for $Name at $Uri..."
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            throw "$Name exited before HTTP readiness. Inspect $logPath"
+        }
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -TimeoutSec 2 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+                Write-Host "$Name HTTP endpoint is ready."
+                return
+            }
+        } catch {
+            # Connection refusal is expected while models are still loading.
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw "$Name did not become HTTP-ready within $TimeoutSeconds seconds. Inspect $logPath"
+}
+
 $ollama = Join-Path $RuntimeRoot 'ollama\ollama.exe'
 $python = Join-Path $RuntimeRoot 'tts-env\python.exe'
 $tts = Join-Path $RuntimeRoot 'GPT-SoVITS'
@@ -44,5 +68,7 @@ try {
 }
 $ttsProcess = Start-OwnedProcess 'gpt-sovits' $python @('api_v2.py', '-a', '127.0.0.1', '-p', '9880', '-c', $config) $tts
 Write-Host "Started Ollama PID $($ollamaProcess.Id), GPT-SoVITS PID $($ttsProcess.Id)."
-Write-Host 'Models may still be loading. Inspect runtime/logs; starting processes is not an inference check.'
+Wait-BackendReady 'ollama' $ollamaProcess 'http://127.0.0.1:11435/api/tags'
+Wait-BackendReady 'gpt-sovits' $ttsProcess 'http://127.0.0.1:9880/openapi.json'
+Write-Host 'Both backend HTTP endpoints are ready. You can now start the Node app; inference has not been tested.'
 Write-Host 'ASR is started by the Node app when the app is run.'

@@ -6,6 +6,13 @@ export interface VoiceProfile {
     promptLanguage: Language;
 }
 
+/** Public catalog metadata; reference paths and transcripts stay on the server. */
+export interface VoiceCatalogEntry {
+    id: string;
+    name: string;
+    language: Language;
+}
+
 export interface TranslationOptions {
     baseUrl: string;
     model: string;

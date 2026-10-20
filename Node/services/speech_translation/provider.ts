@@ -25,6 +25,8 @@ export function createWhisperProvider(config: SpeechTranslationConfig): ServiceP
             }),
         ],
         processMode: 'singleton',
+        // Preserve raw chunks for this service's bounded JSON-line decoder.
+        stdoutMode: 'binary',
         env: {
             PYTHONNOUSERSITE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
             HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1',

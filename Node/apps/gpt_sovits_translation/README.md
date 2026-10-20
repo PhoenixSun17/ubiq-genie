@@ -6,18 +6,19 @@ This app receives speech from users in a Ubiq room, detects complete utterances 
 
 The app follows the [Node architecture](../../README.md), using ApplicationController, VoipReceiver, and ServiceController. The backend implementation does not modify existing apps, shared services, or shared Unity code.
 
-**For the RealtimeTranslation scene, see the [Unity integration guide](../../../Unity/Assets/Apps/RealtimeTranslation/INTEGRATION.md).** That scene uses the new `SoVITSReceiver` and `SoVITSAudioSource`, which plays at the input sample rate. Settings for the legacy ConversationalAgent player are identified separately below.
+**For the RealtimeTranslation scene, see the [Unity integration guide](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/INTEGRATION.md).** That scene uses `SoVITSReceiver`, `SoVITSAudioSource` for playback at the input sample rate, and `SoVITSVoiceSelector` for local voice selection in the Unity Inspector. Settings for the legacy ConversationalAgent player are identified separately below.
 
 ## Current verification status
 
 - Implementation and environment installation records are managed separately. Actual installation results are in `asr-manifest.json`, `receipts/`, and `logs/` under the runtime directory.
 - The two independent Python 3.11 environments and the listed models and tools have been installed locally. Both environments pass `pip check`. Model files were checked against pinned upstream revisions; installed versions and hashes are recorded in the receipts.
-- Approved tests without models have been run: **19 Python worker tests passed**, **13 Node helper tests passed** (including actual FFmpeg conversion), and **8 scheduler/app lifecycle tests passed**. Node localhost mock tests ran outside the isolated environment because it blocked loopback connections and temporary-file replacement.
-- The full app type check currently reports **one pre-existing error**: `components/application.ts:33` references two different Ubiq `NetworkScene` types. A separate baseline check of the original base app reproduced the same diagnostic. New files add no type diagnostics; shared components and existing dependencies were not changed.
+- On 2026-10-20, the app type check and **36 Node tests passed**: 16 helper tests (including actual FFmpeg conversion), 12 scheduler/app tests, and 8 voice-binding protocol tests. Localhost mock tests ran outside the isolated environment because it blocked loopback connections and temporary-file replacement. The earlier **19 Python worker tests** remain the historical Python result; Python was not changed for voice selection.
+- The app type check now passes. The full repository build remains blocked by old `ubiq-server/ubiq` imports in `dynamic_capture_yolo` and `yolo_only_capture`; scoped ESLint cannot load the existing invalid `.eslintrc.json`. These unrelated files were not changed.
 - The RealtimeTranslation receiver passed compilation in Unity **6000.0.61f1** and **52/52 EditMode tests without models**. On 2026-10-13, an approved live diagnostic confirmed Unity microphone frames reaching Node, VAD segmentation, and Chinese ASR. Translation failed because the mutable `qwen3:4b` tag resolved to Thinking 2507; the corrected model is described below.
 - After correction, the existing translation client returned plain Chinese text with thinking disabled (22.229 seconds including first load). A separate English GPT-SoVITS request returned a valid 4.08-second, 32 kHz mono PCM16 WAV using the user's reference voice (51.396 seconds including first-use work). These component checks do not prove Unity playback or steady-state latency.
-- A 5.50-second English reference clip is available locally as `recordings/my-voice-reference.wav`, with an automatically transcribed matching prompt. The current profile binds a session UUID, which must be checked again after Unity restarts. Unconfigured users are ignored.
-- The diagnostic Node/ASR session was stopped at the user's request before a complete corrected live playback test. Actual voice quality, Unity playback, two-user integration, peak GPU memory, and end-to-end latency remain unverified. Future runtime tests retain the project's approval requirement.
+- A 5.50-second English reference clip is available locally as `recordings/my-voice-reference.wav`, with an automatically transcribed matching prompt. Manual file bindings still require the current session UUID; Inspector selections restore the remembered voice for a new UUID after backend confirmation.
+- On 2026-10-19, the user confirmed clear translated playback after the Chinese reference was corrected. Two-user integration, peak GPU memory, and the new Inspector workflow remain unverified in a live room. Future runtime tests retain the project's approval requirement.
+- On 2026-10-20, Unity **6000.0.61f1** compiled successfully and **77/77 EditMode tests passed**: 52 PCM cases and 25 voice-selection state cases. These validate selection, matching acknowledgements, restoration, invalidation, and failure states without models or a room connection; actual Inspector interaction and PlayerPrefs persistence across Editor restarts still require runtime validation. See the [integration guide](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/INTEGRATION.md) for results.
 
 ## Architecture and models
 
@@ -76,6 +77,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\apps\gpt_sovits_translatio
 npm.cmd start gpt_sovits_translation
 ```
 
+Wait for `Both backend HTTP endpoints are ready` before starting Node. The launcher waits up to 10 minutes per backend and reports an error with the log path if a process exits or its HTTP endpoint stays unavailable. These readiness checks do not run translation or synthesis.
+
 On first launch, use the project's existing CLI flow for Ubiq server configuration. The room GUID and server address in `config.json` must match the Unity client. To reconfigure:
 
 ```powershell
@@ -96,16 +99,35 @@ The stop script only manages backend processes saved by this app whose identitie
 
 ## Unity playback settings
 
-For `Unity/Assets/Apps/RealtimeTranslation/RealtimeTranslation.unity`, follow the [Unity integration guide](../../../Unity/Assets/Apps/RealtimeTranslation/INTEGRATION.md). The scene is configured for Nexus (`nexus.cs.ucl.ac.uk:8009`) and room `6765c52b-3ad6-4fb0-9030-2c9a05dc4731`. Keep Node's `translation.outputSampleRate` equal to `SoVITSAudioSource.sourceSampleRate`; both default to **16000**. Unity converts to the device output rate, so this player's source rate does not need to match the sound card rate.
+For `Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/RealtimeTranslation.unity`, follow the [Unity integration guide](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/INTEGRATION.md). The scene is configured for Nexus (`nexus.cs.ucl.ac.uk:8009`) and room `6765c52b-3ad6-4fb0-9030-2c9a05dc4731`. Keep Node's `translation.outputSampleRate` equal to `SoVITSAudioSource.sourceSampleRate`; both default to **16000**. Unity converts to the device output rate, so this player's source rate does not need to match the sound card rate.
 
-Legacy compatibility: use `Unity/Assets/Apps/ConversationalAgent/ConversationalAgent.unity`, or a scene already configured with `ConversationalAgentManager` and `InjectableAudioSource`. For this legacy player only, Node output must match Unity's actual `AudioSettings.outputSampleRate`. The default **16000** matches the current `Unity/ProjectSettings/AudioManager.asset`; check Unity's `Output sample rate` log during integration testing. The ordinary Transcription scene does not automatically include an audio receiver.
+Legacy compatibility: use `Unity/Assets/Ubiq-Genie/Apps/ConversationalAgent/ConversationalAgent.unity`, or a scene already configured with `ConversationalAgentManager` and `InjectableAudioSource`. For this legacy player only, Node output must match Unity's actual `AudioSettings.outputSampleRate`. The default **16000** matches the current `Unity/ProjectSettings/AudioManager.asset`; check Unity's `Output sample rate` log during integration testing. The ordinary Transcription scene does not automatically include an audio receiver.
 
 - Do not run another assistant app that sends audio to `NetworkId(95)` in the same room, as the streams will mix.
 - Every member hears the original voice and the later translation, including the speaker. Translation audio comes from the assistant's audio source, not from each user's avatar position.
 - `targetPeer` is always empty. It is retained for compatibility with the existing audio header and does not select a recipient. The audio header is shorter than 100 bytes; PCM packets are 200–16000 bytes. The final packet is neither zero-padded nor truncated.
 - Use headphones to prevent translated playback from re-entering the microphone. This version adds neither echo cancellation nor controls to mute original voice calls.
 
-## Configuring voices by session UUID
+## Selecting a voice in the Unity Inspector
+
+In the RealtimeTranslation scene, `SoVITSVoiceSelector` is attached to the existing `Ubiq-Genie/SoVITSReceiver` object. Its custom Inspector automatically shows the local client's current UUID. It selects a voice for that client only; there is no in-game or VR selection UI.
+
+After runtime testing is approved:
+
+1. Start the Node app in the same room and enter Unity Play mode.
+2. Select `Ubiq-Genie/SoVITSReceiver` and find the `SoVITSVoiceSelector` Inspector. Wait for the voice catalogue from one Node backend.
+3. Choose a reference voice from the dropdown, labelled with its recording filename and language, then click **Apply Voice**.
+4. Wait for Node's matching acknowledgement with status `bound`. A pending request is not a confirmed binding. Only that acknowledgement saves the selected voice ID to local `PlayerPrefs`, scoped to this Unity project and room.
+
+Node builds the catalogue from the validated entries in `profiles.json` (or `translation.profilesPath`). Entries with the same complete `(refAudioPath, promptText, promptLanguage)` tuple share a SHA-256 voice ID and one dropdown item, even if they have different UUID keys. This keeps the existing UUID file and its format intact; selection does not rewrite it. An empty validated file provides no selectable voices and no default voice.
+
+An acknowledged selection becomes an in-memory override for the current UUID and takes priority over that UUID's file mapping. Clients without an Inspector selection keep the existing UUID-based behavior, including legacy scenes. Ordinary voice changes affect new utterances; queued utterances retain their original voice snapshots.
+
+The last acknowledged choice is automatically requested again after a new UUID, another Play session, or a Node restart, when a single compatible backend and the same voice ID are available. This restoration requires a fresh acknowledgement; a saved preference is not proof that the current session is bound. Changing a profile's path, prompt text, or language changes its voice ID and requires selection again. If a selected voice disappears from the published catalogue, its runtime override is invalidated and affected pending work is canceled; the selector does not guess a replacement.
+
+Offline backends, multiple backends, missing saved voices, and rejected requests are shown in the Inspector. Resolve the reported condition before applying or restoring a choice. Selection requests, acknowledgements, and the small catalogue use existing Ubiq peer properties through Nexus. Only voice IDs, display labels/languages, and binding metadata are exchanged; WAV data, full paths, and prompt text stay on the Node machine. This adds no channel 95 audio message format and changes no Python/model interface.
+
+## Configuring reference voices and legacy UUID bindings
 
 When a user joins, Node prints `Peer UUID: ...; name: ...`. Use that **UUID** as the key in `profiles.json`, following the structure in `profiles.example.json`:
 
@@ -126,11 +148,11 @@ This illustrates the structure and is not a valid ready-to-use configuration. Ad
 - Paths may be absolute or relative to `profiles.json`. In Windows JSON paths, use `/` or escape `\` as `\\`.
 - The local GPT-SoVITS process must be able to read the path. Its API accepts a server-side file path rather than an audio upload.
 
-Saving triggers a hot reload. The current configuration is replaced only if the entire new configuration validates. Invalid JSON from an incomplete edit, or invalid reference audio, is rejected and the previous valid configuration retained. Queued utterances keep a snapshot of their original voice configuration; new utterances use the new configuration. Removing a user's profile cancels their pending work. An invalid initial configuration prevents app startup.
+Saving triggers a hot reload. The current configuration is replaced only if the entire new configuration validates. Invalid JSON from an incomplete edit, or invalid reference audio, is rejected and the previous valid configuration retained. Queued utterances keep a snapshot of their original voice configuration; new utterances use the new configuration. Removing a user's effective voice binding cancels their pending work; removing a catalogue voice also invalidates affected Inspector overrides. An invalid initial configuration prevents app startup.
 
 When a user leaves, their pending utterances and playback are canceled. If the backend has already started computation, the app waits for that request to finish, discards its result, and then processes the next utterance. Closing an HTTP connection alone does not guarantee that backend GPU computation stops immediately. Each backend request still has its configured timeout.
 
-The UUID identifies the current connection and may change after a client restart or rejoin, requiring a new binding. Display names are not used for matching. An empty `profiles.json` does not select a default voice. To keep personal mappings out of version control, set `translation.profilesPath` to the already-ignored `./profiles.local.json`.
+The UUID identifies the current connection and may change after a client restart or rejoin. Manual file bindings require updating the UUID; the Inspector instead requests restoration of its last acknowledged voice for the new UUID. Display names are not used for matching. An empty `profiles.json` does not select a default voice. To keep personal mappings out of version control, set `translation.profilesPath` to the already-ignored `./profiles.local.json`.
 
 ## Logs and troubleshooting
 
@@ -149,7 +171,9 @@ Each successfully generated utterance logs `requestId`, `peerUuid`, language dir
 
 | Symptom | Check |
 | --- | --- |
-| UUIDs appear but no translation plays | Confirm that the current UUID has a valid profile and that the audio path and transcript are correct |
+| UUIDs appear but no translation plays | Confirm a `bound` Inspector acknowledgement for this session or a valid file mapping for the current UUID; check the reference audio and transcript |
+| Inspector cannot apply a voice | Check its status: Node must be online in the same room, only one compatible backend may publish the catalogue, and the chosen voice must still exist |
+| Saved voice is missing after reconnect | Check whether the validated reference path, prompt text, or language changed; select the current catalogue entry and wait for a new `bound` acknowledgement |
 | Initial voice validation fails | Check for unfilled example placeholders and confirm that reference audio is 3–10 seconds long |
 | `/api/chat` or `/tts` connection fails | Start the backends, verify loopback addresses/ports, and inspect backend logs |
 | CUDA DLL / CTranslate2 error | Check the independent environment, CUDA runtime libraries, and installation records; there is no automatic CPU fallback |
@@ -178,6 +202,7 @@ Tests cover framing, split UTF-8 data, audio packet boundaries, 48 kHz stereo to
 1. Reference recordings from two users; verify Chinese to English, English to Chinese, and each user's voice assignment.
 2. Check concurrent users, cancellation on departure, missing reference files, unsupported languages, empty recognition, backend recovery, and queue overload.
 3. In the actual VR scene, inspect CUDA placement, peak GPU memory, stage timings, and end-to-end playback latency. Confirm there is no truncation, speed change, or duplication.
+4. Verify Inspector selection and acknowledgement before saving, automatic restoration for new UUIDs and Node restarts, missing/changed voices, multiple-backend errors, and independent choices from two clients. These new selection behaviors have not been validated by the historical tests above.
 
 After runtime testing is approved, GPU time series can be collected in another terminal and matched to Node's per-utterance `requestId` and timing logs. No such measurements are available yet:
 
