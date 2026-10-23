@@ -10,6 +10,7 @@ import { JsonLineDecoder } from './protocol';
 import { translate, synthesize } from './clients';
 import { splitPcm, wavToPcm } from './audio';
 import type { Language, VoiceCatalogEntry, VoiceProfile } from './types';
+import type { MotionReplayLifecycle, MotionReplayTerminalStatus } from './motion_replay';
 
 interface Job {
     requestId: string;
@@ -19,6 +20,7 @@ interface Job {
     voice: VoiceProfile;
     voiceId: string;
     controller: AbortController;
+    terminal?: MotionReplayTerminalStatus;
 }
 
 interface Transcript {
@@ -300,9 +302,17 @@ export class SpeechTranslationService extends ServiceController {
             this.log(`Dropped ${requestId} (${peerUuid}): ${reason}.`, 'warning');
             return;
         }
-        this.queue.push({
+        const job: Job = {
             requestId, peerUuid, endedAt, durationMs, voice, voiceId: voiceProfileId(voice),
             controller: new AbortController(),
+        };
+        this.queue.push(job);
+        // Approximate the received speech interval using one monotonic clock.
+        // Python endedAt remains wall-clock diagnostic data, never a pose clock.
+        const sourceEndMs = performance.now();
+        this.emitMotion({
+            type: 'accepted', requestId, speakerUuid: peerUuid,
+            sourceStartMs: sourceEndMs - durationMs, sourceEndMs,
         });
         this.diagnostic(`Utterance ${requestId} (${peerUuid}): ${durationMs} ms; queued for ASR.`);
         void this.drain();
@@ -345,6 +355,7 @@ export class SpeechTranslationService extends ServiceController {
                     this.diagnostic(`ASR completed ${job.requestId}: language=${transcript.language}, characters=${original.length}.`);
                     if (!original || !['zh', 'en'].includes(transcript.language)) {
                         this.log(`Skipped ${job.requestId}: empty transcript or unsupported language ${transcript.language}.`);
+                        this.finishMotion(job, 'skipped');
                         continue;
                     }
                     const sourceLanguage = transcript.language as Language;
@@ -381,9 +392,11 @@ export class SpeechTranslationService extends ServiceController {
                         inputDurationMs: job.durationMs, outputDurationMs: Math.round(pcm.length / 2 / this.options.outputSampleRate * 1000),
                     }));
                     await this.play(job, pcm);
+                    this.finishMotion(job, 'sent');
                     this.diagnostic(`Audio sent ${job.requestId}: ${pcm.length} PCM bytes on NetworkId 95; client playback is not confirmed.`);
                 } catch (error) {
                     const canceled = job.controller.signal.aborted || !this.peers.has(job.peerUuid);
+                    this.finishMotion(job, canceled ? 'cancelled' : 'failed');
                     this.log(`${canceled ? 'Canceled' : 'Failed'} ${job.requestId} (${job.peerUuid}): ${error instanceof Error ? error.message : String(error)}`, canceled ? 'info' : 'warning');
                 } finally {
                     this.send({ type: 'discard', requestId: job.requestId });
@@ -401,6 +414,13 @@ export class SpeechTranslationService extends ServiceController {
         const packets = splitPcm(pcm, packetBytes, 200);
         const header = { type: 'AudioInfo', targetPeer: '', audioLength: String(pcm.length) };
         if (Buffer.byteLength(JSON.stringify(header)) >= 100) throw new Error('Unity audio header is too large.');
+        this.assertActive(job);
+        // The synchronous bridge must successfully enqueue this metadata before
+        // the legacy header. A bridge failure prevents unassociated audio.
+        this.emitMotion({
+            type: 'play', requestId: job.requestId, speakerUuid: job.peerUuid,
+            audioLength: pcm.length, sampleRate: this.options.outputSampleRate, sampleCount: pcm.length / 2,
+        });
         this.sendAudio(job, header, Buffer.byteLength(JSON.stringify(header)));
         let nextSendAt = performance.now();
         for (const packet of packets) {
@@ -443,14 +463,26 @@ export class SpeechTranslationService extends ServiceController {
             const job = this.queue[index];
             if (!matches(job)) continue;
             job.controller.abort();
+            this.finishMotion(job, 'cancelled');
             this.send({ type: 'discard', requestId: job.requestId });
             this.queue.splice(index, 1);
         }
         if (this.active && matches(this.active)) {
             this.active.controller.abort();
+            this.finishMotion(this.active, 'cancelled');
             this.send({ type: 'discard', requestId: this.active.requestId });
             // Await an in-flight ASR's terminal response before admitting another GPU job.
         }
+    }
+
+    private emitMotion(event: MotionReplayLifecycle): void {
+        this.emit('motionReplay', event);
+    }
+
+    private finishMotion(job: Job, status: MotionReplayTerminalStatus): void {
+        if (job.terminal) return;
+        job.terminal = status;
+        this.emitMotion({ type: 'terminal', requestId: job.requestId, speakerUuid: job.peerUuid, status });
     }
 
     private failWorker(error: Error): void {
@@ -476,10 +508,17 @@ export class SpeechTranslationService extends ServiceController {
             this.pending.reject(new Error('ASR worker stopped.'));
             this.pending = undefined;
         }
-        this.active?.controller.abort();
-        for (const job of this.queue) job.controller.abort();
+        if (this.active) {
+            this.active.controller.abort();
+            this.finishMotion(this.active, 'cancelled');
+        }
+        for (const job of this.queue) {
+            job.controller.abort();
+            this.finishMotion(job, 'cancelled');
+        }
         this.queue.length = 0;
         this.profiles.close();
+        this.emit('translationClosed');
         super.killAllChildProcesses();
     }
 

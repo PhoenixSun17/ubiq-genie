@@ -5,10 +5,12 @@ import { VoipReceiver } from '../../components/voip_receiver';
 import { SpeechTranslationService } from '../../services/speech_translation/service';
 import { readTranslationConfig } from '../../services/speech_translation/config';
 import { VoiceBindingController } from '../../services/speech_translation/voice_binding';
+import { MotionReplayController } from '../../services/speech_translation/motion_replay';
 
 class GptSovitsTranslation extends ApplicationController {
     private translation!: SpeechTranslationService;
     private voiceBindings?: VoiceBindingController;
+    private motionReplay?: MotionReplayController;
 
     async start(): Promise<void> {
         this.registerComponents();
@@ -27,7 +29,10 @@ class GptSovitsTranslation extends ApplicationController {
     }
 
     registerComponents(): void {
-        this.translation = new SpeechTranslationService(this.scene, readTranslationConfig(this.configPath));
+        const options = readTranslationConfig(this.configPath);
+        this.translation = new SpeechTranslationService(this.scene, options);
+        this.motionReplay = new MotionReplayController(this.scene, this.roomClient, this.translation,
+            options.outputSampleRate, (message) => this.log(message, 'warning'));
         this.components.translation = this.translation;
         this.components.voipReceiver = new VoipReceiver(this.scene);
     }

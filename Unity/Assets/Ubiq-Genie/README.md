@@ -30,9 +30,15 @@ Import samples from **Window → Package Manager → Ubiq-Genie → Samples**:
 | **Scene Describer** | `scene_describer` | Camera capture sent to server for a textual scene description |
 | **Texture Generation** | `texture_generation` | AI-generated textures applied to scene materials |
 | **Transcription** | `transcription` | Real-time speech-to-text transcription |
+| **Realtime Translation** | `gpt_sovits_translation` | Original assistant playback and a copied scene with remote avatar movement replay; import Conversational Agent first |
 | **Video Recorder** | `video_recorder` | Virtual camera recording streamed to the server |
 
 Each sample has a corresponding Node.js server app (listed in the **Server App** column) located in `Node/apps/` of the main repository.
+
+Realtime Translation includes `RealtimeTranslation.unity` and `RealtimeTranslationMotion.unity`.
+The motion scene retains 30 seconds of remote movement and replays each sentence's gestures with
+translated audio while local tracking stays live. See its [motion replay guide](Apps/RealtimeTranslation/MOTION_REPLAY.md).
+Both scenes retain references to Conversational Agent sample scripts/assets; import that sample first when using UPM.
 
 > [!NOTE]
 > Node apps can define multiple versions as subfolders under `Node/apps/<app-name>/`, where each version folder contains its own `app.ts` and `config.json`. Use `npm start <app-name>` to select a version interactively, or `npm start <app-name> <version>` to start one directly.

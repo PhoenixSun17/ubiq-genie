@@ -12,6 +12,7 @@ import { readTranslationConfig } from '../config';
 import { SpeechTranslationService } from '../service';
 import { GptSovitsTranslation } from '../../../apps/gpt_sovits_translation/app';
 import type { VoiceProfile } from '../types';
+import { MotionReplayController, type MotionReplayLifecycle } from '../motion_replay';
 
 const A = '12345678-1234-4123-8123-123456789abc';
 const B = 'abcdef01-1234-4123-8123-123456789abc';
@@ -29,6 +30,8 @@ function harness(t: TestContext) {
     const scene = { connections: [{ socket }], getComponent: () => ({}),
         send: (_id: unknown, message: unknown) => { broadcasts.push(message); } };
     const service = new SpeechTranslationService(scene as unknown as NetworkScene, options);
+    const lifecycle: MotionReplayLifecycle[] = [];
+    service.on('motionReplay', (event: MotionReplayLifecycle) => lifecycle.push(event));
     // The test adapter replaces only I/O. Scheduling, framing and cancellation run unchanged.
     const internal = service as any;
     const profiles = new Map<string, VoiceProfile>([
@@ -60,7 +63,7 @@ function harness(t: TestContext) {
     const utterance = (requestId: string, peerUuid = A) => emit({ type: 'utterance', requestId, peerUuid, endedAt: Date.now(), durationMs: 1000 });
     const transcript = (requestId: string, peerUuid = A, text = '', language = 'zh') => emit({ type: 'transcript', requestId, peerUuid, text, language });
     const requested = () => commands.filter((command) => command.type === 'transcribe').map((command) => command.requestId);
-    return { service, internal, profiles, commands, broadcasts, logs, emit, utterance, transcript, requested, socket, scene };
+    return { service, internal, profiles, commands, broadcasts, logs, emit, utterance, transcript, requested, socket, scene, lifecycle };
 }
 
 /** Load real validated profiles while retaining the in-memory model and network transports. */
@@ -90,6 +93,7 @@ test('scheduler preserves sentence order and rejects the newest sentence beyond 
     for (let i = 0; i < 10; i++) h.utterance(`job-${i}`, i % 2 ? B : A);
     assert.deepEqual(h.requested(), ['job-0']);
     assert.ok(h.commands.some((command) => command.type === 'discard' && command.requestId === 'job-9'));
+    assert.deepEqual(h.lifecycle.map((event) => event.requestId), Array.from({ length: 9 }, (_, i) => `job-${i}`));
     for (let i = 0; i < 9; i++) {
         assert.equal(h.requested().at(-1), `job-${i}`);
         h.transcript(`job-${i}`, i % 2 ? B : A);
@@ -98,6 +102,7 @@ test('scheduler preserves sentence order and rejects the newest sentence beyond 
     assert.deepEqual(h.requested(), Array.from({ length: 9 }, (_, i) => `job-${i}`));
     assert.equal(h.broadcasts.length, 0);
     assert.equal(h.internal.processing, false);
+    assert.equal(h.lifecycle.filter((event) => event.type === 'terminal' && event.status === 'skipped').length, 9);
 });
 
 test('leaving cancels that user only and a late ASR response cannot translate or play', async (t) => {
@@ -106,6 +111,8 @@ test('leaving cancels that user only and a late ASR response cannot translate or
     h.utterance('waiting-a');
     h.utterance('waiting-b', B);
     h.service.removePeer(A);
+    assert.deepEqual(h.lifecycle.filter((event) => event.type === 'terminal').map((event) => event.requestId),
+        ['waiting-a', 'active-a'], 'cancellation reaches clients without awaiting inference');
     assert.deepEqual(h.requested(), ['active-a'], 'the next ASR must wait for the active native call to finish');
     h.transcript('active-a', A, '迟到的结果', 'zh');
     await nextTurn();
@@ -115,6 +122,7 @@ test('leaving cancels that user only and a late ASR response cannot translate or
     h.transcript('waiting-b', B);
     await nextTurn();
     assert.equal(h.internal.processing, false);
+    assert.equal(h.lifecycle.filter((event) => event.type === 'terminal' && event.requestId === 'active-a').length, 1);
 });
 
 test('voice updates keep queued snapshots and removing a profile cancels its pending sentences', async (t) => {
@@ -249,6 +257,68 @@ test('an ASR failure or unsupported language does not block the next sentence', 
     assert.equal(h.broadcasts.length, 0);
     assert.ok(h.logs.some((message) => message.includes('Synthetic ASR failure')));
     assert.equal(h.internal.processing, false);
+    assert.deepEqual(h.lifecycle.filter((event) => event.type === 'terminal').map((event) =>
+        [event.requestId, event.type === 'terminal' ? event.status : '']), [
+        ['failed', 'failed'], ['unsupported', 'skipped'], ['empty', 'skipped'],
+    ]);
+});
+
+test('accepted motion timing uses a monotonic received interval despite worker wall-clock changes', async (t) => {
+    const h = harness(t);
+    h.emit({ type: 'utterance', requestId: 'clock', peerUuid: A, endedAt: 9e12, durationMs: 14500 });
+    const event = h.lifecycle[0];
+    assert.equal(event.type, 'accepted');
+    if (event.type !== 'accepted') return;
+    assert.equal(event.speakerUuid, A);
+    assert.equal(event.sourceEndMs - event.sourceStartMs, 14500);
+    assert.ok(event.sourceEndMs < 9e12);
+    h.transcript('clock');
+    await nextTurn();
+});
+
+test('shutdown publishes one terminal for each pending clip before closing the bridge', async (t) => {
+    const h = harness(t);
+    h.utterance('active');
+    h.utterance('waiting', B);
+    let terminalCountAtClose = 0;
+    h.service.on('translationClosed', () => {
+        terminalCountAtClose = h.lifecycle.filter((event) => event.type === 'terminal').length;
+    });
+    h.service.close();
+    await nextTurn();
+    assert.equal(terminalCountAtClose, 2);
+    assert.equal(h.lifecycle.filter((event) => event.type === 'terminal').length, 2);
+    assert.ok(h.lifecycle.filter((event) => event.type === 'terminal').every((event) =>
+        event.type === 'terminal' && event.status === 'cancelled'));
+});
+
+test('bridge writes play metadata immediately before unchanged ID 95 audio and blocks unassociated audio', async (t) => {
+    const h = harness(t);
+    const writes: { id: number; payload: unknown }[] = [];
+    const scene = Object.assign(h.scene, {
+        register: () => undefined,
+        unregister: () => undefined,
+        send: (id: unknown, payload: unknown) => {
+            writes.push({ id: (id as { b: number }).b, payload });
+        },
+    });
+    const room = Object.assign(new EventEmitter(), {
+        peer: { uuid: B, setProperty: () => undefined },
+        peers: new Map([[A, { uuid: A }]]),
+        room: { uuid: '6765c52b-3ad6-4fb0-9030-2c9a05dc4731' },
+    });
+    const bridge = new MotionReplayController(scene as unknown as NetworkScene, room, h.service, 16000, () => undefined);
+    t.after(() => bridge.close());
+    const job = { requestId: 'audio-1', peerUuid: A, controller: new AbortController() };
+    await h.internal.play(job, Buffer.alloc(200));
+    assert.deepEqual(writes.map((write) => write.id), [101, 95, 95]);
+    assert.deepEqual(writes[1].payload, { type: 'AudioInfo', targetPeer: '', audioLength: '200' });
+    assert.ok(Buffer.isBuffer(writes[2].payload));
+    assert.equal((writes[0].payload as { sampleCount: number }).sampleCount, 100);
+    writes.length = 0;
+    h.socket.writableLength = 32000;
+    await assert.rejects(h.internal.play(job, Buffer.alloc(200)), /congested/);
+    assert.equal(writes.length, 0);
 });
 
 test('audio uses only the typed-array view and unconfigured or departed users are ignored', (t) => {

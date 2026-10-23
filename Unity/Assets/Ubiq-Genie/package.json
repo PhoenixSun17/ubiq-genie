@@ -38,6 +38,11 @@
             "path": "Samples~/Transcription"
         },
         {
+            "displayName": "Realtime Translation",
+            "description": "Chinese-English speech translation and an optional remote avatar motion replay scene. Import Conversational Agent first for shared sample assets and scripts.",
+            "path": "Samples~/RealtimeTranslation"
+        },
+        {
             "displayName": "Video Recorder",
             "description": "Records the scene from a virtual camera and streams to the server.",
             "path": "Samples~/VideoRecorder"

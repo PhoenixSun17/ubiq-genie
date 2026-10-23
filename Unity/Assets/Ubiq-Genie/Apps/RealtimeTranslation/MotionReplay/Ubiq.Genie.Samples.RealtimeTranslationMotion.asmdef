@@ -1,0 +1,7 @@
+{
+    "name": "Ubiq.Genie.Samples.RealtimeTranslationMotion",
+    "rootNamespace": "Ubiq.Genie.Samples.RealtimeTranslationMotion",
+    "references": ["Ubiq", "UbiqGenie.RealtimeTranslation.Core"],
+    "autoReferenced": true,
+    "noEngineReferences": false
+}

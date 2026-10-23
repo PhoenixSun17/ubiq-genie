@@ -1,0 +1,9 @@
+{
+    "name": "Ubiq.Genie.Samples.RealtimeTranslationMotion.Tests",
+    "rootNamespace": "Ubiq.Genie.Samples.RealtimeTranslationMotion.Tests",
+    "references": ["Ubiq.Genie.Samples.RealtimeTranslationMotion", "Ubiq"],
+    "includePlatforms": ["Editor"],
+    "optionalUnityReferences": ["TestAssemblies"],
+    "autoReferenced": false,
+    "noEngineReferences": false
+}

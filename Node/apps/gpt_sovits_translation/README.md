@@ -106,7 +106,45 @@ Legacy compatibility: use `Unity/Assets/Ubiq-Genie/Apps/ConversationalAgent/Conv
 - Do not run another assistant app that sends audio to `NetworkId(95)` in the same room, as the streams will mix.
 - Every member hears the original voice and the later translation, including the speaker. Translation audio comes from the assistant's audio source, not from each user's avatar position.
 - `targetPeer` is always empty. It is retained for compatibility with the existing audio header and does not select a recipient. The audio header is shorter than 100 bytes; PCM packets are 200–16000 bytes. The final packet is neither zero-padded nor truncated.
-- Use headphones to prevent translated playback from re-entering the microphone. This version adds neither echo cancellation nor controls to mute original voice calls.
+- Use headphones to prevent translated playback from re-entering the microphone; neither scene adds echo cancellation. The original RealtimeTranslation scene has no original-voice mute control. The [copied motion scene](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/MOTION_REPLAY.md) adds an Inspector toggle for original remote voice playback.
+
+## Remote avatar motion replay
+
+The copied [`RealtimeTranslationMotion` scene](../../../Unity/Assets/Ubiq-Genie/Apps/RealtimeTranslation/MOTION_REPLAY.md) uses this same backend. The original
+`RealtimeTranslation` scene continues to receive the unchanged channel **95** `AudioInfo` and PCM protocol.
+The backend additionally advertises peer property `ubiq.genie.sovits.motion` as
+`{"version":1,"sessionId":"..."}` and broadcasts JSON sideband messages on **NetworkId 101**.
+Do not run multiple translation backends or another channel 95 sender in the same room.
+
+Every sideband message has `version:1`, `backendUuid`, `sessionId`, and `type`. Utterance messages
+include `requestId` and `speakerUuid`:
+
+| Type | Additional fields and meaning |
+| --- | --- |
+| `accepted` | `sourceStartMs`, `sourceEndMs`: approximate received-speech interval, including VAD preroll and silence, in Node's monotonic `performance.now()` milliseconds |
+| `play` | `audioLength` (numeric PCM bytes), `sampleRate`, `sampleCount`: synchronously sent immediately before this sentence's legacy channel 95 header |
+| `terminal` | `status`: `sent`, `cancelled`, `skipped`, or `failed`; `sent` confirms transmission, not audible completion |
+| `ping` | Client supplies `peerUuid`, string `nonce`, `t0`, and the selected backend/session identity |
+| `pong` | Echoes `peerUuid`, `nonce`, `t0`; adds Node monotonic receive/send times `s1`, `s2` |
+
+Clients keep 30 seconds of live pose history and pin accepted sentence clips before inference.
+Pinned clips may outlive 30 seconds while translation is queued or computed. The copied scene
+linearly fits a pinned clip to translated audio playback, renders live movement again afterward,
+and never replays motion onto the local tracked rig. Own translated audio remains audible.
+This is approximate sentence alignment, not word or phoneme alignment: independently delivered
+WebRTC audio, pose packets, and worker scheduling can shift the estimated interval.
+
+The metadata bridge bounds TCP writes using the same one-second audio budget. If required `play`
+metadata cannot be queued together with its following header, that sentence's audio transmission
+fails rather than sending audio with an ambiguous identity. Accepted metadata is best effort.
+Terminal metadata retries every 250 ms with a 32-message cap; exhausting this cap advertises a
+fresh replay session to release old client state. Clients must fall back to audio-only when
+history or timing is unavailable and release state on backend/session/room changes. Terminal
+messages are idempotent and cancellation is published without waiting for an in-flight model computation.
+
+These additions do not change model dependencies, voice selection, VAD, or the Python worker.
+They require the copied scene for replay; live two-user playback and headset comfort must be
+checked separately from unit tests.
 
 ## Selecting a voice in the Unity Inspector
 
